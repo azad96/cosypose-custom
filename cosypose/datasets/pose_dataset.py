@@ -42,13 +42,14 @@ class PoseDataset(torch.utils.data.Dataset):
                  background_augmentation=False):
 
         self.scene_ds = VisibilityWrapper(scene_ds)
-
         self.resize_augmentation = CropResizeToAspectAugmentation(resize=resize)
         self.min_area = min_area
 
         self.background_augmentation = background_augmentation
-        self.background_augmentations = VOCBackgroundAugmentation(
-            voc_root=LOCAL_DATA_DIR / 'VOCdevkit/VOC2012', p=0.3)
+        self.background_augmentations = None
+        if self.background_augmentation:
+            self.background_augmentations = VOCBackgroundAugmentation(
+                voc_root=LOCAL_DATA_DIR / 'VOCdevkit/VOC2012', p=0.3)
 
         self.rgb_augmentation = rgb_augmentation
         self.rgb_augmentations = [
@@ -76,9 +77,9 @@ class PoseDataset(torch.utils.data.Dataset):
 
     def get_data(self, idx):
         rgb, mask, state = self.scene_ds[idx]
-
         rgb, mask, state = self.resize_augmentation(rgb, mask, state)
-
+        # print('\n\n\n{}\n\n\n'.format(rgb.shape))
+        
         if self.background_augmentation:
             rgb, mask, state = self.background_augmentations(rgb, mask, state)
 

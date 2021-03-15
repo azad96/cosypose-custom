@@ -1,74 +1,27 @@
 BOP_CONFIG = dict()
-BOP_CONFIG['hb'] = dict(
-    input_resize=(640, 480),
-    urdf_ds_name='hb',
-    obj_ds_name='hb',
-    train_pbr_ds_name=['hb.pbr'],
-    inference_ds_name=['hb.bop19'],
-    test_ds_name=[],
-)
-
-BOP_CONFIG['icbin'] = dict(
-    input_resize=(640, 480),
-    urdf_ds_name='icbin',
-    obj_ds_name='icbin',
-    train_pbr_ds_name=['icbin.pbr'],
-    inference_ds_name=['icbin.bop19'],
-    test_ds_name=['icbin.bop19'],
-)
-
-
-BOP_CONFIG['itodd'] = dict(
-    input_resize=(1280, 960),
-    urdf_ds_name='itodd',
-    obj_ds_name='itodd',
-    train_pbr_ds_name=['itodd.pbr'],
-    inference_ds_name=['itodd.bop19'],
-    test_ds_name=[],
-    val_ds_name=['itodd.val'],
-)
-
-
-BOP_CONFIG['lmo'] = dict(
-    input_resize=(640, 480),
-    urdf_ds_name='lm',
-    obj_ds_name='lm',
-    train_pbr_ds_name=['lm.pbr'],
-    inference_ds_name=['lmo.bop19'],
-    test_ds_name=['lmo.bop19'],
-)
-
 
 BOP_CONFIG['tless'] = dict(
-    input_resize=(720, 540),
+    input_resize=(1080, 810),
+    render_size=(360, 480),
     urdf_ds_name='tless.cad',
     obj_ds_name='tless.cad',
+    kuartis_urdf_ds_name='kuartis.cad',
+    kuartis_obj_ds_name='kuartis.cad',
     train_pbr_ds_name=['tless.pbr'],
+    train_kuartis_ds_name=['kuartis.pbr.train'],
+    test_kuartis_ds_name=['kuartis.pbr.test'],
     inference_ds_name=['tless.bop19'],
     test_ds_name=['tless.bop19'],
     train_synt_real_ds_names=[('tless.pbr', 4), ('tless.primesense.train', 1)]
 )
 
-BOP_CONFIG['tudl'] = dict(
-    input_resize=(640, 480),
-    urdf_ds_name='tudl',
-    obj_ds_name='tudl',
-    train_pbr_ds_name=['tudl.pbr'],
-    inference_ds_name=['tudl.bop19'],
-    test_ds_name=['tudl.bop19'],
-    train_synt_real_ds_names=[('tudl.pbr', 10), ('tudl.train.real', 1)]
-)
-
-
-BOP_CONFIG['ycbv'] = dict(
-    input_resize=(640, 480),
-    urdf_ds_name='ycbv',
-    obj_ds_name='ycbv.bop',
-    train_pbr_ds_name=['ycbv.pbr'],
-    train_pbr_real_ds_names=[('ycbv.pbr', 1), ()],
-    inference_ds_name=['ycbv.bop19'],
-    test_ds_name=['ycbv.bop19'],
-    train_synt_real_ds_names=[('ycbv.pbr', 20), ('ycbv.train.synt', 1), ('ycbv.train.real', 3)]
+BOP_CONFIG['kuatless'] = dict(
+    input_resize=(1080, 810),
+    render_size=(360, 480),
+    urdf_ds_name='kuartis.cad',
+    obj_ds_name='kuartis.cad',
+    train_pbr_ds_name=['kuatless.train_pbr'],
+    test_pbr_ds_name=['kuatless.test_pbr_1080_810'],
 )
 
 PBR_DETECTORS = dict(

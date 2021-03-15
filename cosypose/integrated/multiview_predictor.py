@@ -42,7 +42,7 @@ class MultiviewScenePredictor:
 
     def predict_scene_state(
             self, candidates, cameras,
-            score_th=0.3, use_known_camera_poses=False,
+            score_th=0.2, use_known_camera_poses=False,
             ransac_n_iter=2000, ransac_dist_threshold=0.02,
             ba_n_iter=100):
 

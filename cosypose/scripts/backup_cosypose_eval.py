@@ -2,6 +2,7 @@ from cosypose.utils.tqdm import patch_tqdm; patch_tqdm()  # noqa
 import torch.multiprocessing
 import time
 import json
+
 from collections import OrderedDict
 import yaml
 import argparse
@@ -19,9 +20,9 @@ from cosypose.utils.distributed import init_distributed_mode, get_world_size
 from cosypose.lib3d import Transform
 
 from cosypose.lib3d.rigid_mesh_database import MeshDataBase
-from cosypose.training.pose_models_cfg_org import create_model_refiner, create_model_coarse, check_update_config
-from cosypose.integrated.pose_predictor_org import CoarseRefinePosePredictor
+from cosypose.training.pose_models_cfg import create_model_refiner, create_model_coarse, check_update_config
 from cosypose.rendering.bullet_batch_renderer import BulletBatchRenderer
+from cosypose.integrated.pose_predictor import CoarseRefinePosePredictor
 from cosypose.integrated.multiview_predictor import MultiviewScenePredictor
 
 from cosypose.evaluation.meters.pose_meters import PoseErrorMeter
@@ -47,8 +48,58 @@ torch.backends.cudnn.benchmark = False
 
 
 @MEMORY.cache
-def load_kuatless_detection_results(pickle_file, remove_incorrect_poses=False):
-    results_path = LOCAL_DATA_DIR / 'saved_detections' / pickle_file
+def load_posecnn_results():
+    results_path = LOCAL_DATA_DIR / 'saved_detections' / 'ycbv_posecnn.pkl'
+    results = pkl.loads(results_path.read_bytes())
+    infos, poses, bboxes = [], [], []
+
+    l_offsets = (LOCAL_DATA_DIR / 'bop_datasets/ycbv' / 'offsets.txt').read_text().strip().split('\n')
+    ycb_offsets = dict()
+    for l_n in l_offsets:
+        obj_id, offset = l_n[:2], l_n[3:]
+        obj_id = int(obj_id)
+        offset = np.array(json.loads(offset)) * 0.001
+        ycb_offsets[obj_id] = offset
+
+    def mat_from_qt(qt):
+        wxyz = qt[:4].copy().tolist()
+        xyzw = [*wxyz[1:], wxyz[0]]
+        t = qt[4:].copy()
+        return Transform(xyzw, t)
+
+    for scene_view_str, result in results.items():
+        scene_id, view_id = scene_view_str.split('/')
+        scene_id, view_id = int(scene_id), int(view_id)
+        n_dets = result['rois'].shape[0]
+        for n in range(n_dets):
+            obj_id = result['rois'][:, 1].astype(np.int)[n]
+            label = f'obj_{obj_id:06d}'
+            infos.append(dict(
+                scene_id=scene_id,
+                view_id=view_id,
+                score=result['rois'][n, 1],
+                label=label,
+            ))
+            bboxes.append(result['rois'][n, 2:6])
+            pose = mat_from_qt(result['poses'][n])
+            offset = ycb_offsets[obj_id]
+            pose = pose * Transform((0, 0, 0, 1), offset).inverse()
+            poses.append(pose.toHomogeneousMatrix())
+
+    data = tc.PandasTensorCollection(
+        infos=pd.DataFrame(infos),
+        poses=torch.as_tensor(np.stack(poses)).float(),
+        bboxes=torch.as_tensor(np.stack(bboxes)).float(),
+    ).cpu()
+    return data
+
+
+@MEMORY.cache
+def load_pix2pose_results(all_detections=True, remove_incorrect_poses=False):
+    if all_detections:
+        results_path = LOCAL_DATA_DIR / 'saved_detections' / 'tless_pix2pose_retinanet_vivo_all.pkl'
+    else:
+        results_path = LOCAL_DATA_DIR / 'saved_detections' / 'tless_pix2pose_retinanet_siso_top1.pkl'
     pix2pose_results = pkl.loads(results_path.read_bytes())
     infos, poses, bboxes = [], [], []
     for key, result in pix2pose_results.items():
@@ -77,7 +128,7 @@ def load_kuatless_detection_results(pickle_file, remove_incorrect_poses=False):
                 ))
                 bboxes.append(new_boxes[o])
                 poses.append(poses_[o])
-    
+
     data = tc.PandasTensorCollection(
         infos=pd.DataFrame(infos),
         poses=torch.as_tensor(np.stack(poses)),
@@ -92,22 +143,29 @@ def get_pose_meters(scene_ds):
     compute_add = False
     spheres_overlap_check = True
     large_match_threshold_diameter_ratio = 0.5
-    if ds_name == 'kuatless.test_pbr_1080_810':
-        targets_filename = 'kuatless_test_1080_810.json'
-        n_top = -1
+    if ds_name == 'tless.primesense.test.bop19':
+        targets_filename = 'test_targets_bop19.json'
         visib_gt_min = -1
-    elif ds_name == 'kuatless.test_pbr_720_540':
-        targets_filename = 'kuatless_test_720_540.json'
-        n_top = -1
+        n_top = -1  # Given by targets
+    elif ds_name == 'tless.primesense.test':
+        targets_filename = 'all_target_tless.json'
+        n_top = 1
+        visib_gt_min = 0.1
+    elif 'ycbv' in ds_name:
+        compute_add = True
         visib_gt_min = -1
-    elif ds_name == 'kuatless.test2_pbr_720_540':
-        targets_filename = 'kuatless_test2_720_540.json'
-        n_top = -1
-        visib_gt_min = -1
+        targets_filename = None
+        n_top = 1
+        spheres_overlap_check = False
     else:
         raise ValueError
 
-    object_ds_name = 'kuartis.eval'
+    if 'tless' in ds_name:
+        object_ds_name = 'tless.eval'
+    elif 'ycbv' in ds_name:
+        object_ds_name = 'ycbv.bop-compat.eval'  # This is important for definition of symmetric objects
+    else:
+        raise ValueError
 
     if targets_filename is not None:
         targets_path = scene_ds.ds_dir / targets_filename
@@ -142,48 +200,55 @@ def get_pose_meters(scene_ds):
             match_threshold=large_match_threshold_diameter_ratio,
             report_error_stats=True, report_error_AUC=True, **base_kwargs)
 
-        meters.update({f'{error_type}_ntop=BOP_matching=BOP':  # For ADD-S<0.1d
-                        PoseErrorMeter(error_type=error_type, match_threshold=0.1, **base_kwargs),
+        if 'ycbv' in ds_name:
+            # For fair comparison with PoseCNN/DeepIM on YCB-Video ADD(-S) AUC
+            meters[f'{error_type}_ntop=1_matching=CLASS'] = PoseErrorMeter(
+                error_type=error_type, consider_all_predictions=False,
+                match_threshold=np.inf,
+                report_error_stats=False, report_error_AUC=True, **base_kwargs)
 
-                        f'{error_type}_ntop=ALL_matching=BOP':  # For mAP
-                        PoseErrorMeter(error_type=error_type, match_threshold=0.1,
-                                        consider_all_predictions=True,
-                                        report_AP=True, **base_kwargs)})
+        if 'tless' in ds_name:
+            meters.update({f'{error_type}_ntop=BOP_matching=BOP':  # For ADD-S<0.1d
+                           PoseErrorMeter(error_type=error_type, match_threshold=0.1, **base_kwargs),
+
+                           f'{error_type}_ntop=ALL_matching=BOP':  # For mAP
+                           PoseErrorMeter(error_type=error_type, match_threshold=0.1,
+                                          consider_all_predictions=True,
+                                          report_AP=True, **base_kwargs)})
     return meters
 
 
-def load_models(coarse_run_id, refiner_run_id=None, coarse_epoch=None, refiner_epoch=None, n_workers=8, object_set='tless'):
+def load_models(coarse_run_id, refiner_run_id=None, n_workers=8, object_set='tless'):
     if object_set == 'tless':
         object_ds_name, urdf_ds_name = 'tless.bop', 'tless.cad'
-    elif object_set == 'kuartis':
-        object_ds_name, urdf_ds_name = 'kuartis.cad', 'kuartis.cad'
+    else:
+        object_ds_name, urdf_ds_name = 'ycbv.bop-compat.eval', 'ycbv'
 
     object_ds = make_object_dataset(object_ds_name)
     mesh_db = MeshDataBase.from_object_ds(object_ds)
     renderer = BulletBatchRenderer(object_set=urdf_ds_name, n_workers=n_workers)
     mesh_db_batched = mesh_db.batched().cuda()
 
-    def load_model(run_id, epoch):
+    def load_model(run_id):
         if run_id is None:
             return
         run_dir = EXP_DIR / run_id
         cfg = yaml.load((run_dir / 'config.yaml').read_text(), Loader=yaml.FullLoader)
         cfg = check_update_config(cfg)
-        checkpoint = f'checkpoint_{epoch}.pth.tar' if epoch else 'checkpoint.pth.tar'
         if cfg.train_refiner:
             model = create_model_refiner(cfg, renderer=renderer, mesh_db=mesh_db_batched)
-            ckpt = torch.load(run_dir / checkpoint) 
+            ckpt = torch.load(run_dir / 'checkpoint.pth.tar')
         else:
             model = create_model_coarse(cfg, renderer=renderer, mesh_db=mesh_db_batched)
-            ckpt = torch.load(run_dir / checkpoint)
+            ckpt = torch.load(run_dir / 'checkpoint.pth.tar')
         ckpt = ckpt['state_dict']
         model.load_state_dict(ckpt)
         model = model.cuda().eval()
         model.cfg = cfg
         return model
 
-    coarse_model = load_model(coarse_run_id, coarse_epoch)
-    refiner_model = load_model(refiner_run_id, refiner_epoch)
+    coarse_model = load_model(coarse_run_id)
+    refiner_model = load_model(refiner_run_id)
     model = CoarseRefinePosePredictor(coarse_model=coarse_model,
                                       refiner_model=refiner_model)
     return model, mesh_db
@@ -199,60 +264,84 @@ def main():
     init_distributed_mode()
 
     parser = argparse.ArgumentParser('Evaluation')
-    parser.add_argument('--config', default='kuatless-1080-810', type=str)
-    parser.add_argument('--comment', type=str, required=True)
-    parser.add_argument('--nviews', dest='n_views', default=1, type=int, required=True)
+    parser.add_argument('--config', default='tless-bop', type=str)
+    parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--job_dir', default='', type=str)
+    parser.add_argument('--comment', default='', type=str)
+    parser.add_argument('--nviews', dest='n_views', default=1, type=int)
     args = parser.parse_args()
 
-    n_workers = 4
-    n_plotters = 4
+    coarse_run_id = None
+    refiner_run_id = None
+    n_workers = 8
+    n_plotters = 8
+    n_views = 1
 
+    n_frames = None
+    scene_id = None
+    group_id = None
+    n_groups = None
     n_views = args.n_views
     skip_mv = args.n_views < 2
+    skip_predictions = False
 
-    object_set = 'kuartis'
-    # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-34030' # v1
-    # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-324309' # v2
-    # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-168790' # v3 epoch 60
-    # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-787707' # v4 epoch 30
-    # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-306798' # v5.3 epoch 170
-    coarse_run_id = 'bop-kuatless-coarse--373078' # v6 epoch 140
-    coarse_epoch = 140
-    # refiner_run_id = 'bop-tless-kuartis-refiner--607469' # v1
-    # refiner_run_id = 'bop-tless-kuartis-refiner--434633' # v2
-    # refiner_run_id = 'bop-tless-kuartis-refiner--243227' # v3 epoch 90
-    # refiner_run_id = 'bop-tless-kuartis-refiner--689761' # v4 epoch 20 but 100 seems better
-    # refiner_run_id = 'bop-tless-kuartis-refiner--143806' # v5.1 epoch 200
-    refiner_run_id = 'bop-tless-kuartis-refiner--842437' # v5.2 epoch 180
-    refiner_epoch = 10
-    n_coarse_iterations = 1
-    n_refiner_iterations = 1
-
-    if args.config == 'kuatless-1080-810':
-        ds_name = 'kuatless.test_pbr_1080_810'
-        pickle_file = 'kuatless_test_1080_810.pkl'
-    elif args.config == 'kuatless-720-540':
-        ds_name = 'kuatless.test_pbr_720_540'
-        pickle_file = 'kuatless_test_720_540.pkl'
-    elif args.config == 'kuatless-720-540-v2':
-        ds_name = 'kuatless.test2_pbr_720_540'
-        pickle_file = 'kuatless_test2_720_540.pkl'
+    object_set = 'tless'
+    if 'tless' in args.config:
+        object_set = 'tless'
+        coarse_run_id = 'tless-coarse--10219'
+        refiner_run_id = 'tless-refiner--585928'
+        n_coarse_iterations = 1
+        n_refiner_iterations = 4
+    elif 'ycbv' in args.config:
+        object_set = 'ycbv'
+        refiner_run_id = 'ycbv-refiner-finetune--251020'
+        n_coarse_iterations = 0
+        n_refiner_iterations = 2
     else:
         raise ValueError(args.config)
 
-    save_dir = RESULTS_DIR / f'{args.config}-n_views={n_views}-{args.comment}'
+    if args.config == 'tless-siso':
+        ds_name = 'tless.primesense.test'
+        assert n_views == 1
+    elif args.config == 'tless-vivo':
+        ds_name = 'tless.primesense.test.bop19'
+    elif args.config == 'ycbv':
+        ds_name = 'ycbv.test.keyframes'
+    else:
+        raise ValueError(args.config)
+
+    if args.debug:
+        if 'tless' in args.config:
+            scene_id = None
+            group_id = 64
+            n_groups = 2
+        else:
+            scene_id = 48
+            n_groups = 2
+        n_frames = None
+        n_workers = 0
+        n_plotters = 0
+
+    n_rand = np.random.randint(1e10)
+    save_dir = RESULTS_DIR / f'{args.config}-n_views={n_views}-{args.comment}-{n_rand}'
     logger.info(f"SAVE DIR: {save_dir}")
     logger.info(f"Coarse: {coarse_run_id}")
     logger.info(f"Refiner: {refiner_run_id}")
-    
+
     # Load dataset
     scene_ds = make_scene_dataset(ds_name)
 
+    if scene_id is not None:
+        mask = scene_ds.frame_index['scene_id'] == scene_id
+        scene_ds.frame_index = scene_ds.frame_index[mask].reset_index(drop=True)
+    if n_frames is not None:
+        scene_ds.frame_index = scene_ds.frame_index[mask].reset_index(drop=True)[:n_frames]
+
     # Predictions
-    predictor, mesh_db = load_models(coarse_run_id, refiner_run_id, coarse_epoch=coarse_epoch, refiner_epoch=refiner_epoch,
-                                    n_workers=n_plotters, object_set=object_set)
+    predictor, mesh_db = load_models(coarse_run_id, refiner_run_id, n_workers=n_plotters, object_set=object_set)
 
     mv_predictor = MultiviewScenePredictor(mesh_db)
+
     base_pred_kwargs = dict(
         n_coarse_iterations=n_coarse_iterations,
         n_refiner_iterations=n_refiner_iterations,
@@ -261,19 +350,39 @@ def main():
         mv_predictor=mv_predictor,
     )
 
-    pix2pose_detections = load_kuatless_detection_results(pickle_file=pickle_file, remove_incorrect_poses=False).cpu()
-    pred_kwargs = {
-        'pix2pose_detections': dict(
-            detections=pix2pose_detections,
-            **base_pred_kwargs
-        ),
-    }
-    
+    if skip_predictions:
+        pred_kwargs = {}
+    elif 'tless' in ds_name:
+        pix2pose_detections = load_pix2pose_results(all_detections='bop19' in ds_name).cpu()
+        pred_kwargs = {
+            'pix2pose_detections': dict(
+                detections=pix2pose_detections,
+                **base_pred_kwargs
+            ),
+        }
+    elif 'ycbv' in ds_name:
+        posecnn_detections = load_posecnn_results()
+        pred_kwargs = {
+            'posecnn_init': dict(
+                detections=posecnn_detections,
+                use_detections_TCO=posecnn_detections,
+                **base_pred_kwargs
+            ),
+        }
+    else:
+        raise ValueError(ds_name)
+
     scene_ds_pred = MultiViewWrapper(scene_ds, n_views=n_views)
+
+    if group_id is not None:
+        mask = scene_ds_pred.frame_index['group_id'] == group_id
+        scene_ds_pred.frame_index = scene_ds_pred.frame_index[mask].reset_index(drop=True)
+    elif n_groups is not None:
+        scene_ds_pred.frame_index = scene_ds_pred.frame_index[:n_groups]
 
     pred_runner = MultiviewPredictionRunner(
         scene_ds_pred, batch_size=1, n_workers=n_workers,
-        cache_data=False)
+        cache_data=len(pred_kwargs) > 1)
 
     all_predictions = dict()
     for pred_prefix, pred_kwargs_n in pred_kwargs.items():
@@ -285,23 +394,16 @@ def main():
     logger.info("Done with predictions")
     torch.distributed.barrier()
 
-    results = dict(
-        summary=None,
-        summary_txt=None,
-        predictions=all_predictions,
-        metrics=None,
-        summary_df=None,
-        dfs=None,
-    )
-
-    if not save_dir.exists():
-        save_dir.mkdir()
-    torch.save(results, save_dir / 'results.pth.tar')
-
     # Evaluation
     predictions_to_evaluate = set()
-    det_key = 'pix2pose_detections'
-    # predictions_to_evaluate.add(f'{det_key}/coarse/iteration={n_coarse_iterations}')
+    if 'ycbv' in ds_name:
+        det_key = 'posecnn_init'
+        all_predictions['posecnn'] = posecnn_detections
+        predictions_to_evaluate.add('posecnn')
+    elif 'tless' in ds_name:
+        det_key = 'pix2pose_detections'
+    else:
+        raise ValueError(ds_name)
     predictions_to_evaluate.add(f'{det_key}/refiner/iteration={n_refiner_iterations}')
 
     if args.n_views > 1:
@@ -336,20 +438,29 @@ def main():
     all_predictions = gather_predictions(all_predictions)
 
     metrics_to_print = dict()
-    metrics_to_print.update({
-        # f'{det_key}/coarse/iteration={n_coarse_iterations}/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Singleview/AUC of ADD-S',
-        # # f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Singleview/ADD-S<0.1d',
-        # f'{det_key}/coarse/iteration={n_coarse_iterations}/ADD-S_ntop=ALL_matching=BOP/mAP': f'Singleview/mAP@ADD-S<0.1d',
+    if 'ycbv' in ds_name:
+        metrics_to_print.update({
+            f'posecnn/ADD(-S)_ntop=1_matching=CLASS/AUC/objects/mean': f'PoseCNN/AUC of ADD(-S)',
+
+            f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD(-S)_ntop=1_matching=CLASS/AUC/objects/mean': f'Singleview/AUC of ADD(-S)',
+            f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=1_matching=CLASS/AUC/objects/mean': f'Singleview/AUC of ADD-S',
+
+            f'{det_key}/ba_output+all_cand/ADD(-S)_ntop=1_matching=CLASS/AUC/objects/mean': f'Multiview (n={args.n_views})/AUC of ADD(-S)',
+            f'{det_key}/ba_output+all_cand/ADD-S_ntop=1_matching=CLASS/AUC/objects/mean': f'Multiview (n={args.n_views})/AUC of ADD-S',
+        })
+    elif 'tless' in ds_name:
+        metrics_to_print.update({
+            f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Singleview/AUC of ADD-S',
+            # f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Singleview/ADD-S<0.1d',
+            f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=ALL_matching=BOP/mAP': f'Singleview/mAP@ADD-S<0.1d',
 
 
-        f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Singleview/AUC of ADD-S',
-        f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Singleview/ADD-S<0.1d',
-        f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=ALL_matching=BOP/mAP': f'Singleview/mAP@ADD-S<0.1d',
-
-        # f'{det_key}/ba_output+all_cand/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Multiview (n={args.n_views})/AUC of ADD-S',
-        # f'{det_key}/ba_output+all_cand/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Multiview (n={args.n_views})/ADD-S<0.1d',
-        # f'{det_key}/ba_output+all_cand/ADD-S_ntop=ALL_matching=BOP/mAP': f'Multiview (n={args.n_views}/mAP@ADD-S<0.1d)',
-    })
+            f'{det_key}/ba_output+all_cand/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Multiview (n={args.n_views})/AUC of ADD-S',
+            # f'{det_key}/ba_output+all_cand/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Multiview (n={args.n_views})/ADD-S<0.1d',
+            f'{det_key}/ba_output+all_cand/ADD-S_ntop=ALL_matching=BOP/mAP': f'Multiview (n={args.n_views}/mAP@ADD-S<0.1d)',
+        })
+    else:
+        raise ValueError
 
     metrics_to_print.update({
         f'{det_key}/ba_input/ADD-S_ntop=BOP_matching=OVERLAP/norm': f'Multiview before BA/ADD-S (m)',
@@ -357,8 +468,7 @@ def main():
     })
 
     if get_rank() == 0:
-        if not save_dir.exists():
-            save_dir.mkdir()
+        save_dir.mkdir()
         results = format_results(all_predictions, eval_metrics, eval_dfs, print_metrics=False)
         (save_dir / 'full_summary.txt').write_text(results.get('summary_txt', ''))
 

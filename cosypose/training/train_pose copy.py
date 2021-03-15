@@ -38,7 +38,7 @@ from .pose_models_cfg import create_model_pose, check_update_config
 from cosypose.utils.logging import get_logger
 from cosypose.utils.distributed import get_world_size, get_rank, sync_model, init_distributed_mode, reduce_dict
 from torch.backends import cudnn
-import pickle
+
 cudnn.benchmark = True
 logger = get_logger(__name__)
 
@@ -285,8 +285,9 @@ def train_pose(args):
     if args.run_id_pretrain is not None:
         # pretrain_path = EXP_DIR / args.run_id_pretrain / 'checkpoint_140.pth.tar' #TODO(BOTAN)
         pretrain_path = EXP_DIR / args.run_id_pretrain / 'checkpoint.pth.tar'
+        
         logger.info(f'Using pretrained model from {pretrain_path}.')
-        # ckpt = torch.load(pretrain_path)['state_dict'] #TODO(BOTAN)
+        ckpt = torch.load(pretrain_path)['state_dict']
         # model = load_pretrained_weights2(model, ckpt)        #TODO(BOTAN)
         model.load_state_dict(torch.load(pretrain_path)['state_dict'])
         
@@ -302,13 +303,44 @@ def train_pose(args):
         start_epoch = 0
     end_epoch = args.n_epochs
 
+    # TODO(BOTAN)
+    # for param in model.parameters():
+    #     param.requires_grad = False
+
+    # model.confidence_fc.weight.requires_grad = True
+    # model.confidence_fc.bias.requires_grad = True
+
+    our_params1 = []
+    our_params2 = []
+
+    for name, param in model.named_parameters():
+        print(name, param.requires_grad)
+        if name.find("confidence") >= 0:
+            our_params1.append(param)
+        else:
+            our_params2.append(param)
+
+
+    param_groups1 = [{'params':our_params1, 'lr':args.lr}]
+    param_groups2 = [{'params':our_params2, 'lr':args.lr}]
+
+    # TODO(BOTAN)
+
+
+
 
     # Synchronize models across processes.
     model = sync_model(model)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device], output_device=device)
 
     # Optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    # TODO(Botan)
+    optimizer = torch.optim.Adam(param_groups1, weight_decay=args.weight_decay)
+    optimizer2 = torch.optim.Adam(param_groups2, weight_decay=args.weight_decay)
+    # TODO(Botan)
+
+
 
     # Warmup
     if args.n_epochs_warmup == 0:
@@ -326,9 +358,6 @@ def train_pose(args):
     )
     lr_scheduler.last_epoch = start_epoch - 1
     lr_scheduler.step()
-
-    features_save_pth = args.save_dir / "features"
-    features_save_pth.mkdir(exist_ok=True)
 
     for epoch in range(start_epoch, end_epoch):
         meters_train = defaultdict(lambda: AverageValueMeter())
@@ -349,28 +378,41 @@ def train_pose(args):
                 optimizer.zero_grad()
 
                 t = time.time()
-                loss, feat, losses_TCO = h(data=sample, meters=meters_train)
-
-                confidence_dict = dict()
-                confidence_dict['feat'] = feat
-                confidence_dict['losses'] = losses_TCO
-                #features_file_save_pth = features_save_pth / "f_{:03}_{:06}_{:06}.pkl".format(get_rank(), epoch, n)
-                #fi = open(features_file_save_pth, "wb")
-                #.dump(confidence_dict, fi)
-                #fi.close()
-
+                # loss = h(data=sample, meters=meters_train) #TODO(BOTAN)
+                loss, loss_TCO, confidence_loss = h(data=sample, meters=meters_train) #TODO(BOTAN)
                 
                 meters_time['forward'].add(time.time() - t)
                 iterator.set_postfix(loss=loss.item())
                 meters_train['loss_total'].add(loss.item())
 
                 t = time.time()
-                loss.backward()
+
+                # TODO(Botan)
+                # loss.backward()
+                loss_TCO.backward(retain_graph=True)
+
                 total_grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=args.clip_grad_norm, norm_type=2)
+                # total_grad_norm = torch.nn.utils.clip_grad_norm_(
+                #     param_groups1['params'], max_norm=args.clip_grad_norm, norm_type=2)
+
+                
+                # TODO(Botan)
+
                 meters_train['grad_norm'].add(torch.as_tensor(total_grad_norm).item())
-         
+
+                # optimizer.step()
+                # TODO(Botan)
                 optimizer.step()
+                # TODO(Botan)
+
+                confidence_loss.backward()
+                optimizer2.step()
+                # TODO(Botan)
+
+
+
+
                 meters_time['backward'].add(time.time() - t)
                 meters_time['memory'].add(torch.cuda.max_memory_allocated() / 1024. ** 2)
 
@@ -384,7 +426,7 @@ def train_pose(args):
         def validation():
             model.eval()
             for sample in tqdm(ds_iter_val, ncols=80):
-                loss, feat, losses_TCO = h(data=sample, meters=meters_val)
+                loss, loss_TCO, confidence_loss = h(data=sample, meters=meters_val)
                 meters_val['loss_total'].add(loss.item())
 
         @torch.no_grad()

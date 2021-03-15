@@ -38,7 +38,7 @@ from .pose_models_cfg import create_model_pose, check_update_config
 from cosypose.utils.logging import get_logger
 from cosypose.utils.distributed import get_world_size, get_rank, sync_model, init_distributed_mode, reduce_dict
 from torch.backends import cudnn
-import pickle
+
 cudnn.benchmark = True
 logger = get_logger(__name__)
 
@@ -327,9 +327,6 @@ def train_pose(args):
     lr_scheduler.last_epoch = start_epoch - 1
     lr_scheduler.step()
 
-    features_save_pth = args.save_dir / "features"
-    features_save_pth.mkdir(exist_ok=True)
-
     for epoch in range(start_epoch, end_epoch):
         meters_train = defaultdict(lambda: AverageValueMeter())
         meters_val = defaultdict(lambda: AverageValueMeter())
@@ -349,17 +346,7 @@ def train_pose(args):
                 optimizer.zero_grad()
 
                 t = time.time()
-                loss, feat, losses_TCO = h(data=sample, meters=meters_train)
-
-                confidence_dict = dict()
-                confidence_dict['feat'] = feat
-                confidence_dict['losses'] = losses_TCO
-                #features_file_save_pth = features_save_pth / "f_{:03}_{:06}_{:06}.pkl".format(get_rank(), epoch, n)
-                #fi = open(features_file_save_pth, "wb")
-                #.dump(confidence_dict, fi)
-                #fi.close()
-
-                
+                loss = h(data=sample, meters=meters_train)
                 meters_time['forward'].add(time.time() - t)
                 iterator.set_postfix(loss=loss.item())
                 meters_train['loss_total'].add(loss.item())
@@ -384,7 +371,7 @@ def train_pose(args):
         def validation():
             model.eval()
             for sample in tqdm(ds_iter_val, ncols=80):
-                loss, feat, losses_TCO = h(data=sample, meters=meters_val)
+                loss, loss_TCO, confidence_loss = h(data=sample, meters=meters_val)
                 meters_val['loss_total'].add(loss.item())
 
         @torch.no_grad()

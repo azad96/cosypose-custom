@@ -187,7 +187,6 @@ def multiview_candidate_matching(candidates, mesh_db,
     filtered_candidates = scene_level_matching(candidates, inliers)
     scene_infos = make_obj_infos(filtered_candidates)
     timer_misc.pause()
-
     outputs = dict(
         filtered_candidates=filtered_candidates,
         scene_infos=scene_infos,

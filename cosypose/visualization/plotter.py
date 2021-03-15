@@ -26,11 +26,129 @@ class Plotter:
         assert rgb_input.dtype == np.uint8 and rgb_rendered.dtype == np.uint8
         mask = ~(rgb_rendered.sum(axis=-1) == 0)
 
-        overlay = np.zeros_like(rgb_input)
-        overlay[~mask] = rgb_input[~mask] * 0.6 + 255 * 0.4
-        overlay[mask] = rgb_rendered[mask] * 0.8 + 255 * 0.2
-        # overlay[mask] = rgb_rendered[mask] * 0.3 + rgb_input[mask] * 0.7
+        overlay = rgb_input
+        overlay[:,:,2][mask] = overlay[:,:,2][mask]*0.80 #+ rgb_rendered[:,:,2][mask]*0.2
+        overlay[:,:,1][mask] = overlay[:,:,1][mask]*0.80 + rgb_rendered[:,:,1][mask]*0.2
+        overlay[:,:,0][mask] = overlay[:,:,0][mask]*0.80 #+ rgb_rendered[:,:,0][mask]*0.2
+        
         f = self.plot_image(overlay, name='image')
+        return f
+
+
+    def plot_new_confidence_scores(self, f, detections, confidences, colors='red', line_width=0, source_id=''):
+        text = ['{:.2f}'.format(conf.item()) for conf in confidences]
+        boxes = None
+        try:
+            boxes = self.numpy(detections.bboxes)
+        except:
+            boxes = self.numpy(detections.initial_bboxes)
+        xs = []
+        ys = []
+        patch_colors = []
+
+        if text is not None:
+            assert len(text) == len(boxes)
+            text_x, text_y = [], []
+        if isinstance(colors, (list, tuple, np.ndarray)):
+            assert len(colors) == len(boxes)
+        else:
+            colors = [colors for _ in range(len(boxes))]
+
+        # Convert boxes to bokeh coordinate system
+        boxes = np.array(boxes)
+        boxes[:, [1, 3]] = f.plot_height - boxes[:, [1, 3]]
+        for n, box in enumerate(boxes):
+            x1, y1, x2, y2 = box
+            xs.append([x1, x2, x2, x1])
+            ys.append([y1, y1, y2, y2])
+            patch_colors.append(colors[n])
+            if text is not None:
+                text_x.append(x1)
+                text_y.append(y1)
+        source, new = self.get_source(f'{f.id}/{source_id}/bboxes')
+
+        if new:
+            f.patches(xs='xs', ys='ys', source=source,
+                      line_width=line_width, color='colors', fill_alpha=0.0)
+
+            if text is not None:
+                labelset = LabelSet(x='text_x', y='text_y', text='text',
+                                    text_align='left', text_baseline='bottom',
+                                    text_color='white',
+                                    source=source, background_fill_color='colors',
+                                    text_font_size="10pt")
+                f.add_layout(labelset)
+        data = dict(xs=xs, ys=ys, colors=patch_colors)
+        if text is not None:
+            data.update(text_x=text_x, text_y=text_y, text=text)
+        source.data = data
+        return f
+
+
+    def plot_confidence_scores(self, f, detections, pred_rendered_binary, segmentation, colors='red', line_width=0, source_id=''):
+        text = []
+        for det in detections:
+            try:
+                bbox = det.bboxes
+            except:
+                bbox = det.initial_bboxes
+            x = round(bbox[1].item())
+            y = round(bbox[0].item())
+            width = round(bbox[3].item()) - x
+            height = round(bbox[2].item()) - y
+            obj_seg = segmentation[x:x+width, y:y+height]
+            obj_rend = pred_rendered_binary[x:x+width, y:y+height]
+
+            intersection = np.logical_and(obj_seg, obj_rend)
+            union = np.logical_or(obj_seg, obj_rend)
+            iou_score = np.sum(intersection) / np.sum(union)
+            text.append('{:.2f}'.format(iou_score))
+
+        boxes = None
+        try:
+            boxes = self.numpy(detections.bboxes)
+        except:
+            boxes = self.numpy(detections.initial_bboxes)
+        xs = []
+        ys = []
+        patch_colors = []
+
+        if text is not None:
+            assert len(text) == len(boxes)
+            text_x, text_y = [], []
+        if isinstance(colors, (list, tuple, np.ndarray)):
+            assert len(colors) == len(boxes)
+        else:
+            colors = [colors for _ in range(len(boxes))]
+
+        # Convert boxes to bokeh coordinate system
+        boxes = np.array(boxes)
+        boxes[:, [1, 3]] = f.plot_height - boxes[:, [1, 3]]
+        for n, box in enumerate(boxes):
+            x1, y1, x2, y2 = box
+            xs.append([x1, x2, x2, x1])
+            ys.append([y1, y1, y2, y2])
+            patch_colors.append(colors[n])
+            if text is not None:
+                text_x.append(x1)
+                text_y.append(y1)
+        source, new = self.get_source(f'{f.id}/{source_id}/bboxes')
+
+        if new:
+            f.patches(xs='xs', ys='ys', source=source,
+                      line_width=line_width, color='colors', fill_alpha=0.0)
+
+            if text is not None:
+                labelset = LabelSet(x='text_x', y='text_y', text='text',
+                                    text_align='left', text_baseline='bottom',
+                                    text_color='white',
+                                    source=source, background_fill_color='colors',
+                                    text_font_size="10pt")
+                f.add_layout(labelset)
+        data = dict(xs=xs, ys=ys, colors=patch_colors)
+        if text is not None:
+            data.update(text_x=text_x, text_y=text_y, text=text)
+        source.data = data
         return f
 
     def plot_maskrcnn_bboxes(self, f, detections, colors='red', text=None, text_auto=True, line_width=2, source_id=''):
