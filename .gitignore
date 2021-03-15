@@ -20,6 +20,4 @@ dist/
 *.so
 build/
 *.temp
-git_history/
-git_my/
 jobs/
