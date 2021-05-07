@@ -20,10 +20,11 @@ from bop_toolkit_lib import inout  # noqa
 
 def main():
     parser = argparse.ArgumentParser('Bop evaluation')
-    # parser.add_argument('--result_name', default='kuatless-1080-810-n_views=1-v6-epoch190', type=str)
-    parser.add_argument('--result_name', default='kuatless-720-540-n_views=1-v4', type=str)
-    # parser.add_argument('--targets_filename', default='kuatless_test_1080_810.json', type=str)
-    parser.add_argument('--targets_filename', default='kuatless_test_720_540.json', type=str)
+    parser.add_argument('--result_name', default='bm2-test3-1080-810-n_views=1-v1', type=str)
+    # parser.add_argument('--result_name', default='kuatless-1080-810-n_views=1-v9', type=str)
+    # parser.add_argument('--result_name', default='kuatless-720-540-n_views=1-v4', type=str)
+    parser.add_argument('--targets_filename', default='bm2_test3_1080_810.json', type=str)
+    # parser.add_argument('--targets_filename', default='kuatless_test_720_540.json', type=str)
     parser.add_argument('--convert_only', action='store_true')
     args = parser.parse_args()
     run_evaluation(args)
@@ -31,19 +32,19 @@ def main():
 
 def run_evaluation(args):
     result_path = os.path.join(RESULTS_DIR, args.result_name, 'results.pth.tar')
-    # coarse_csv_name = 'coarsev4-check_kuatless-test.csv'
-    # coarse_csv_path = os.path.join(RESULTS_DIR, args.result_name, coarse_csv_name)
-    # coarse_method = 'pix2pose_detections/coarse/iteration=1'
-    # convert_results(result_path, coarse_csv_path, method=coarse_method)
+    coarse_csv_name = 'coarse-v1__bm2-test3_pbr_1080_810.csv'
+    coarse_csv_path = os.path.join(RESULTS_DIR, args.result_name, coarse_csv_name)
+    coarse_method = 'pix2pose_detections/coarse/iteration=1'
+    convert_results(result_path, coarse_csv_path, method=coarse_method)
 
-    # refiner_csv_name = 'refiner-v6-epoch190__kuatless-test_pbr_1080_810.csv'
-    refiner_csv_name = 'refiner-v4__kuatless-test_pbr_720_540.csv'
-    refiner_csv_path = os.path.join(RESULTS_DIR, args.result_name, refiner_csv_name)
-    refiner_method = 'pix2pose_detections/refiner/iteration=1'
-    convert_results(result_path, refiner_csv_path, method=refiner_method)
+    # refiner_csv_name = 'refiner-v9__kuatless-test_pbr_1080_810.csv'
+    # # refiner_csv_name = 'refiner-v4__kuatless-test_pbr_720_540.csv'
+    # refiner_csv_path = os.path.join(RESULTS_DIR, args.result_name, refiner_csv_name)
+    # refiner_method = 'pix2pose_detections/refiner/iteration=1'
+    # convert_results(result_path, refiner_csv_path, method=refiner_method)
 
     # csv_paths = ','.join([coarse_csv_path, refiner_csv_path])
-    csv_paths = refiner_csv_path
+    csv_paths = coarse_csv_path
 
     if not args.convert_only:
         run_bop_evaluation(csv_paths, args.targets_filename)

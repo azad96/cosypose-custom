@@ -1,7 +1,5 @@
-from pickle import NONE
-from cosypose.scripts.run_multiview_n import compute_intrinsic
 import sys
-sys.path.append("/mnt/trains/users/botan/GAG/mmdetection")
+sys.path.append("/mnt/trains/users/azad/mmdetection")
 from  bm_scripts.bm_inference_azad import BMDetector
 import os
 import torch
@@ -108,20 +106,25 @@ def get_cam_coeff(img_name, calibration):
 
 
 def main():
-    urdf_ds_name = 'kuartis.cad'
+    urdf_ds_name = 'kuatless.cad'
     input_dim = (1080, 810)
-    # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-168790' # v3 epoch 60
     # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-306798' # v5.3 epoch 170
-    coarse_run_id = 'bop-kuatless-coarse--373078' # v6 epoch 140 cosypose pretrained
+    # coarse_run_id = 'bop-kuatless-coarse-v6' # v6 epoch 140 cosypose pretrained
     # coarse_run_id = 'bop-kuatless-coarse--865501' # v7 epoch 120 
-    coarse_epoch = 140
+    # coarse_run_id = 'bop-bm-coarse-v1-51375' # epoch 100 
+    # coarse_run_id = 'bop-bm2-coarse-v1-942603' # epoch 320
+    # coarse_run_id = 'bop-kuatless-coarse-noise4-766450'
+    # coarse_run_id = 'bop-kuatless-coarse-noise5-114693'
+    # coarse_run_id = 'bop-kuatless-coarse-noise-132k-582997'
+    coarse_run_id = 'bop-kuatless-coarse-noise-132k-v2-955393'
+    coarse_epoch = 30
     n_coarse_iterations = 1
 
     # refiner_run_id = 'bop-tless-kuartis-refiner--243227' # v3 epoch 90
-    refiner_run_id = 'bop-tless-kuartis-refiner--842437' # v5.2 epoch 180
-    # refiner_run_id = None
-    refiner_epoch = 180
-    n_refiner_iterations = 1
+    # refiner_run_id = 'bop-kuatless-refiner-v5.2' # v5.2 epoch 180
+    refiner_run_id = None
+    refiner_epoch = 0
+    n_refiner_iterations = 0
 
     bm_detector = BMDetector()
     pose_predictor, _ = load_pose_models(coarse_run_id=coarse_run_id, refiner_run_id=refiner_run_id,
@@ -130,26 +133,31 @@ def main():
     plotter = Plotter()
 
     input_folders = [
-         'cell_4cam/workingplane_1080_810',
-         'cell_4cam/objects_no_clutter_1080_810',
-         'cell_4cam/objects_1080_810',
-         'bracket_mix/object_mix3_1080_810',
-         'bracket_mix/object_mix2_1080_810',
-         'bracket_mix/object_mix1_1080_810',
-         'bracket/object_1080_810', 
+        'cell_4cam/workingplane_1080_810',
+        'cell_4cam/objects_no_clutter_1080_810',
+        'cell_4cam/objects_1080_810',
+        'bracket_mix/object_mix3_1080_810',
+        'bracket_mix/object_mix2_1080_810',
+        'bracket_mix/object_mix1_1080_810',
+        'bracket/object_1080_810', 
+        # '1080_810/channel_bracket_A',
+        # '1080_810/screw_terminal',
     ]
     total_time = 0.0
     image_count = 0
     start_time = time.time()
     for folder_name in input_folders:
         folder_pth = '/mnt/trains/users/azad/BM/inputs/{}'.format(folder_name)
-        save_dir = '/mnt/trains/users/azad/BM/results/v6_with_segmentation/{}'.format(folder_name)
-        seg_save_dir = '{}/segmentation_masks'.format(save_dir)
+        save_dir = '/mnt/trains/users/azad/BM/results/noise_model_on_real/{}'.format(folder_name)
+        # folder_pth = '/mnt/trains/users/azad/BM/inputs/{}'.format(folder_name)
+        # save_dir = '/mnt/trains/users/azad/BM/results/asd/{}'.format(folder_name)
         os.makedirs(save_dir, exist_ok=True)
-        os.makedirs(seg_save_dir, exist_ok=True)
+
+        print(folder_pth)
 
         file_names = os.listdir(folder_pth)
-        img_names = [file_name for file_name in file_names if file_name.endswith('.png') or file_name.endswith('.jpg')]
+        img_names = sorted([file_name for file_name in file_names if file_name.endswith('.png') or file_name.endswith('.jpg')])
+        img_names = img_names[:1]
         img_paths = [os.path.join(folder_pth, img_name) for img_name in img_names]
         image_count += len(img_names)
         
@@ -162,6 +170,7 @@ def main():
 
             cam_coeff = get_cam_coeff(img_name, calibration)
             K = compute_intrinsic(cam_coeff, input_dim)
+
             cam = dict(
                 resolution=input_dim,
                 K=K,
@@ -170,9 +179,8 @@ def main():
 
             t0 = time.time()
             detections, segmentation = bm_detector.get_detection(img_path)
-
-            img_seg = Image.fromarray(segmentation)
-            img_seg.save('{}/{}'.format(seg_save_dir, img_name))
+            # img_seg = Image.fromarray(segmentation)
+            # img_seg.save('{}/{}'.format(seg_save_dir, img_name))
             # conds = [bbox[1] != 0 and ceil(bbox[2]) != input_dim[0] and 
             #          bbox[0] != 0 and ceil(bbox[3]) != input_dim[1] for bbox in detections.bboxes]
             # conds = [cond.item() if type(cond) == torch.Tensor else cond for cond in conds]

@@ -135,17 +135,12 @@ def main():
 
     pose_predictor, icp_refiner = getModel(coarse_run_id, refiner_run_id, coarse_epoch, refiner_epoch)
 
-    urdf_ds_name = 'kuartis.cad'
+    urdf_ds_name = 'kuatless.cad'
     renderer = BulletSceneRenderer(urdf_ds_name)
     
     K = np.array([[1905.52, 0.0, 361.142],
                     [0.0, 1902.99, 288.571],
                     [0.0, 0.0, 1.0]])
-    """
-    K = np.array([[1075.650, 0.0, 360],
-                [0.0, 1073.903, 270],
-                [0.0, 0.0, 1.0]])
-    """
     cam = dict(
         resolution=(720, 540),
         K=K,
@@ -173,7 +168,6 @@ def main():
 
         t0 = time.time()
         #detections
-        
         label = []
         bboxes = []
         img_id = str(int(img_name.split('.')[0]))

@@ -50,6 +50,7 @@ torch.backends.cudnn.benchmark = False
 def load_kuatless_detection_results(pickle_file, remove_incorrect_poses=False):
     results_path = LOCAL_DATA_DIR / 'saved_detections' / pickle_file
     pix2pose_results = pkl.loads(results_path.read_bytes())
+
     infos, poses, bboxes = [], [], []
     for key, result in pix2pose_results.items():
         scene_id, view_id = key.split('/')
@@ -88,26 +89,14 @@ def load_kuatless_detection_results(pickle_file, remove_incorrect_poses=False):
 
 def get_pose_meters(scene_ds):
     ds_name = scene_ds.name
-
     compute_add = False
     spheres_overlap_check = True
     large_match_threshold_diameter_ratio = 0.5
-    if ds_name == 'kuatless.test_pbr_1080_810':
-        targets_filename = 'kuatless_test_1080_810.json'
-        n_top = -1
-        visib_gt_min = -1
-    elif ds_name == 'kuatless.test_pbr_720_540':
-        targets_filename = 'kuatless_test_720_540.json'
-        n_top = -1
-        visib_gt_min = -1
-    elif ds_name == 'kuatless.test2_pbr_720_540':
-        targets_filename = 'kuatless_test2_720_540.json'
-        n_top = -1
-        visib_gt_min = -1
-    else:
-        raise ValueError
-
-    object_ds_name = 'kuartis.eval'
+    n_top = -1
+    visib_gt_min = -1
+    dataset_type, test_ds = ds_name.split('.')
+    test_type, pbr_type, width, height = test_ds.split('_')
+    targets_filename = '{}_{}_{}_{}.json'.format(dataset_type, test_type, width, height) #kuatless_test_1080_810.json
 
     if targets_filename is not None:
         targets_path = scene_ds.ds_dir / targets_filename
@@ -116,6 +105,7 @@ def get_pose_meters(scene_ds):
     else:
         targets = None
 
+    object_ds_name = '{}.eval'.format(dataset_type)
     object_ds = make_object_dataset(object_ds_name)
     mesh_db = MeshDataBase.from_object_ds(object_ds)
 
@@ -136,27 +126,24 @@ def get_pose_meters(scene_ds):
 
     meters = dict()
     for error_type in error_types:
-        # For measuring ADD-S AUC on T-LESS and average errors on ycbv/tless.
-        meters[f'{error_type}_ntop=BOP_matching=OVERLAP'] = PoseErrorMeter(
-            error_type=error_type, consider_all_predictions=False,
-            match_threshold=large_match_threshold_diameter_ratio,
-            report_error_stats=True, report_error_AUC=True, **base_kwargs)
-
         meters.update({f'{error_type}_ntop=BOP_matching=BOP':  # For ADD-S<0.1d
                         PoseErrorMeter(error_type=error_type, match_threshold=0.1, **base_kwargs),
 
-                        f'{error_type}_ntop=ALL_matching=BOP':  # For mAP
-                        PoseErrorMeter(error_type=error_type, match_threshold=0.1,
-                                        consider_all_predictions=True,
-                                        report_AP=True, **base_kwargs)})
+                        # f'{error_type}_ntop=BOP_matching=OVERLAP': # For measuring ADD-S AUC on T-LESS and average errors on ycbv/tless
+                        # PoseErrorMeter(error_type=error_type, consider_all_predictions=False,
+                        #                 match_threshold=large_match_threshold_diameter_ratio,
+                        #                 report_error_stats=True, report_error_AUC=True, **base_kwargs),
+
+                        # f'{error_type}_ntop=ALL_matching=BOP':  # For mAP
+                        # PoseErrorMeter(error_type=error_type, match_threshold=0.1,
+                        #                 consider_all_predictions=True,
+                        #                 report_AP=True, **base_kwargs),
+                    })
     return meters
 
 
-def load_models(coarse_run_id, refiner_run_id=None, coarse_epoch=None, refiner_epoch=None, n_workers=8, object_set='tless'):
-    if object_set == 'tless':
-        object_ds_name, urdf_ds_name = 'tless.bop', 'tless.cad'
-    elif object_set == 'kuartis':
-        object_ds_name, urdf_ds_name = 'kuartis.cad', 'kuartis.cad'
+def load_models(coarse_run_id, refiner_run_id=None, coarse_epoch=None, refiner_epoch=None, n_workers=8, object_set='kuatless'):
+    object_ds_name = urdf_ds_name = '{}.cad'.format(object_set)
 
     object_ds = make_object_dataset(object_ds_name)
     mesh_db = MeshDataBase.from_object_ds(object_ds)
@@ -199,7 +186,7 @@ def main():
     init_distributed_mode()
 
     parser = argparse.ArgumentParser('Evaluation')
-    parser.add_argument('--config', default='kuatless-1080-810', type=str)
+    parser.add_argument('--config', default='kuatless-1080-810', type=str, required=True)
     parser.add_argument('--comment', type=str, required=True)
     parser.add_argument('--nviews', dest='n_views', default=1, type=int, required=True)
     args = parser.parse_args()
@@ -210,36 +197,36 @@ def main():
     n_views = args.n_views
     skip_mv = args.n_views < 2
 
-    object_set = 'kuartis'
     # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-34030' # v1
     # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-324309' # v2
     # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-168790' # v3 epoch 60
     # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-787707' # v4 epoch 30
     # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-306798' # v5.3 epoch 170
-    coarse_run_id = 'bop-kuatless-coarse--373078' # v6 epoch 140
-    coarse_epoch = 140
+    # coarse_run_id = 'bop-kuatless-coarse-v6' # v6 epoch 140
+    # coarse_run_id = 'bop-kuatless-coarse-785678' # v9 epoch 190
+    # coarse_run_id = 'bop-bm-coarse-v1-51375' # epoch 100
+    # coarse_run_id = 'bop-bm2-coarse-v1-942603' # epoch 320
+    # coarse_run_id = 'bop-bm2-coarse-mix-990393'
+    # coarse_run_id = 'bop-kuatless-coarse-noise4-766450'
+    coarse_run_id = 'bop-kuatless-coarse-noise5-114693'
+    coarse_epoch = 120
+    n_coarse_iterations = 1
+
+    refiner_run_id = None
     # refiner_run_id = 'bop-tless-kuartis-refiner--607469' # v1
     # refiner_run_id = 'bop-tless-kuartis-refiner--434633' # v2
     # refiner_run_id = 'bop-tless-kuartis-refiner--243227' # v3 epoch 90
     # refiner_run_id = 'bop-tless-kuartis-refiner--689761' # v4 epoch 20 but 100 seems better
     # refiner_run_id = 'bop-tless-kuartis-refiner--143806' # v5.1 epoch 200
-    refiner_run_id = 'bop-tless-kuartis-refiner--842437' # v5.2 epoch 180
-    refiner_epoch = 10
-    n_coarse_iterations = 1
-    n_refiner_iterations = 1
+    # refiner_run_id = 'bop-kuatless-refiner-v5.2' # v5.2 epoch 180
+    refiner_epoch = 0
+    n_refiner_iterations = 0
 
-    if args.config == 'kuatless-1080-810':
-        ds_name = 'kuatless.test_pbr_1080_810'
-        pickle_file = 'kuatless_test_1080_810.pkl'
-    elif args.config == 'kuatless-720-540':
-        ds_name = 'kuatless.test_pbr_720_540'
-        pickle_file = 'kuatless_test_720_540.pkl'
-    elif args.config == 'kuatless-720-540-v2':
-        ds_name = 'kuatless.test2_pbr_720_540'
-        pickle_file = 'kuatless_test2_720_540.pkl'
-    else:
-        raise ValueError(args.config)
-
+    ds_type, test_type, w, h = args.config.split('-') # kuatless-test-1080-810
+    ds_name = '{}.{}_pbr_{}_{}'.format(ds_type, test_type, w, h) # kuatless.test_pbr_1080_810
+    pickle_file = '{}_{}_{}_{}.pkl'.format(ds_type, test_type, w, h) # kuatless_test_1080_810.pkl
+    object_set = ds_type
+    
     save_dir = RESULTS_DIR / f'{args.config}-n_views={n_views}-{args.comment}'
     logger.info(f"SAVE DIR: {save_dir}")
     logger.info(f"Coarse: {coarse_run_id}")
@@ -301,8 +288,8 @@ def main():
     # Evaluation
     predictions_to_evaluate = set()
     det_key = 'pix2pose_detections'
-    # predictions_to_evaluate.add(f'{det_key}/coarse/iteration={n_coarse_iterations}')
-    predictions_to_evaluate.add(f'{det_key}/refiner/iteration={n_refiner_iterations}')
+    predictions_to_evaluate.add(f'{det_key}/coarse/iteration={n_coarse_iterations}')
+    # predictions_to_evaluate.add(f'{det_key}/refiner/iteration={n_refiner_iterations}')
 
     if args.n_views > 1:
         for k in [
@@ -337,14 +324,14 @@ def main():
 
     metrics_to_print = dict()
     metrics_to_print.update({
-        # f'{det_key}/coarse/iteration={n_coarse_iterations}/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Singleview/AUC of ADD-S',
-        # # f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Singleview/ADD-S<0.1d',
-        # f'{det_key}/coarse/iteration={n_coarse_iterations}/ADD-S_ntop=ALL_matching=BOP/mAP': f'Singleview/mAP@ADD-S<0.1d',
+        f'{det_key}/coarse/iteration={n_coarse_iterations}/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Singleview/AUC of ADD-S',
+        f'{det_key}/coarse/iteration={n_coarse_iterations}/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Singleview/ADD-S<0.1d',
+        f'{det_key}/coarse/iteration={n_coarse_iterations}/ADD-S_ntop=ALL_matching=BOP/mAP': f'Singleview/mAP@ADD-S<0.1d',
 
 
-        f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Singleview/AUC of ADD-S',
-        f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Singleview/ADD-S<0.1d',
-        f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=ALL_matching=BOP/mAP': f'Singleview/mAP@ADD-S<0.1d',
+        # f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Singleview/AUC of ADD-S',
+        # f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Singleview/ADD-S<0.1d',
+        # f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=ALL_matching=BOP/mAP': f'Singleview/mAP@ADD-S<0.1d',
 
         # f'{det_key}/ba_output+all_cand/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Multiview (n={args.n_views})/AUC of ADD-S',
         # f'{det_key}/ba_output+all_cand/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Multiview (n={args.n_views})/ADD-S<0.1d',

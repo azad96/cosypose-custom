@@ -58,7 +58,9 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 
-def load_models(coarse_run_id, refiner_run_id=None, coarse_epoch=None, refiner_epoch=None, n_workers=8, object_ds_name='kuartis.cad', urdf_ds_name='kuartis.cad'):
+def load_models(coarse_run_id, refiner_run_id=None, coarse_epoch=None, refiner_epoch=None, n_workers=8, object_set='kuatless'):
+    object_ds_name = urdf_ds_name = '{}.cad'.format(object_set)
+    
     object_ds = make_object_dataset(object_ds_name)
     mesh_db = MeshDataBase.from_object_ds(object_ds)
     renderer = BulletBatchRenderer(object_set=urdf_ds_name, n_workers=n_workers)
@@ -205,9 +207,7 @@ def main():
     args = parser.parse_args()
 
     n_workers = 4
-
-    object_ds_name = 'kuartis.cad'
-    urdf_ds_name = 'kuartis.cad'
+    object_set = 'kuatless'
     
     # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-168790' # v3
     coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-787707' # v4 epoch 30
@@ -227,7 +227,7 @@ def main():
     # Predictions
     bm_detector = BMDetector()
     predictor, mesh_db = load_models(coarse_run_id, refiner_run_id, coarse_epoch=coarse_epoch, refiner_epoch=refiner_epoch, 
-                                    n_workers=n_workers, object_ds_name=object_ds_name, urdf_ds_name=urdf_ds_name)
+                                    n_workers=n_workers, object_set=object_set)
     mv_predictor = MultiviewScenePredictor(mesh_db)
 
     K = np.array([[1905.52, 0.0, 361.142],

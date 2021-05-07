@@ -43,8 +43,7 @@ cudnn.benchmark = True
 logger = get_logger(__name__)
 
 
-def log(config, model,
-        log_dict, test_dict, epoch):
+def log(config, model, log_dict, test_dict, epoch):
     save_dir = config.save_dir
     save_dir.mkdir(exist_ok=True)
     log_dict.update(epoch=epoch)
@@ -327,8 +326,8 @@ def train_pose(args):
     lr_scheduler.last_epoch = start_epoch - 1
     lr_scheduler.step()
 
-    features_save_pth = args.save_dir / "features"
-    features_save_pth.mkdir(exist_ok=True)
+    # features_save_pth = args.save_dir / "features"
+    # features_save_pth.mkdir(exist_ok=True)
 
     for epoch in range(start_epoch, end_epoch):
         meters_train = defaultdict(lambda: AverageValueMeter())

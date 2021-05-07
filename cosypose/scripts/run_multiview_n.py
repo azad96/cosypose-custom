@@ -8,12 +8,11 @@ import json
 
 from collections import OrderedDict
 import yaml
-import argparse
 import os
 import torch
 import numpy as np
 import pandas as pd
-import pickle as pkl
+from pathlib import Path
 import logging
 from bokeh.io import export_png
 from bokeh.plotting import gridplot
@@ -58,7 +57,9 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 
-def load_models(coarse_run_id, refiner_run_id=None, coarse_epoch=None, refiner_epoch=None, n_workers=8, object_ds_name='kuartis.cad', urdf_ds_name='kuartis.cad'):
+def load_models(coarse_run_id, refiner_run_id=None, coarse_epoch=None, refiner_epoch=None, n_workers=8, object_set='kuatless'):
+    object_ds_name = urdf_ds_name = '{}.cad'.format(object_set)
+    
     object_ds = make_object_dataset(object_ds_name)
     mesh_db = MeshDataBase.from_object_ds(object_ds)
     renderer = BulletBatchRenderer(object_set=urdf_ds_name, n_workers=n_workers)
@@ -137,15 +138,41 @@ def get_twc():
     return _twc
 
 
-def compute_intrinsic(fx, fy, cx, cy):
-    new_fx = fx*(2/7)
-    new_fy = fy*(2/7)
-    new_cx = (cx-568/2)*(2/7)
-    new_cy = (cy-174/2)*(2/7)
+# def compute_intrinsic(fx, fy, cx, cy):
+#     coeff = 3/7
+#     new_fx = fx*coeff
+#     new_fy = fy*coeff
+#     new_cx = (cx-568/2)*coeff
+#     new_cy = (cy-174/2)*coeff
+#     K = np.array([[new_fx, 0.0, new_cx],
+#                 [0.0, new_fy, new_cy],
+#                 [0.0, 0.0, 1.0]])
+#     return K
+
+def compute_intrinsic(cam_coeff, input_dim):
+    if input_dim == (1080, 810):
+        coeff = 3/7
+    elif input_dim == (720, 540):
+        coeff = 2/7
+    else:
+        raise ValueError(input_dim)
+    
+    fx, fy, cx, cy = cam_coeff[:4]
+    new_fx = fx*coeff
+    new_fy = fy*coeff
+    new_cx = (cx-568/2)*coeff
+    new_cy = (cy-174/2)*coeff
     K = np.array([[new_fx, 0.0, new_cx],
                 [0.0, new_fy, new_cy],
                 [0.0, 0.0, 1.0]])
     return K
+
+
+def get_cam_coeff(img_name, calibration):
+    frame_id = img_name.split('_')[2]
+    cam_coeff = [comp['properties']['camera_coefficients'] for comp in calibration['components'] if comp['uuid'] == frame_id]
+    assert len(cam_coeff) == 1
+    return cam_coeff[0]
 
 
 def main():
@@ -157,70 +184,78 @@ def main():
     logger.info("Starting ...")
     init_distributed_mode()
 
-    parser = argparse.ArgumentParser('Multiview')
-    parser.add_argument('--config', default='tless-bop', type=str)
-    parser.add_argument('--comment', default='', type=str)
-    args = parser.parse_args()
-
     n_workers = 4
+    object_set = 'kuatless'
+    input_dim = (1080, 810)
 
-    object_ds_name = 'kuartis.cad'
-    urdf_ds_name = 'kuartis.cad'
-    
-    # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-168790' # v3
-    coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-787707' # v4 epoch 30
-    coarse_epoch = 30
+    coarse_run_id = 'bop-kuatless-coarse-v6' # epoch 140
+    coarse_epoch = 140
     n_coarse_iterations = 1
 
-    # refiner_run_id = 'bop-tless-kuartis-refiner--243227' # v3 epoch 90
-    refiner_run_id = 'bop-tless-kuartis-refiner--689761' # v4 epoch 20, 100 seems better
-    refiner_epoch = 100
+    refiner_run_id = 'bop-kuatless-refiner-v5.2' # epoch 180
+    refiner_epoch = 180
     n_refiner_iterations = 1
 
-    # save_dir = RESULTS_DIR / f'{args.config}-n_views={n_views}-{args.comment}'
-    # logger.info(f"SAVE DIR: {save_dir}")
     logger.info(f"Coarse: {coarse_run_id}")
     logger.info(f"Refiner: {refiner_run_id}")
 
     # Predictions
     bm_detector = BMDetector()
     predictor, mesh_db = load_models(coarse_run_id, refiner_run_id, coarse_epoch=coarse_epoch, refiner_epoch=refiner_epoch, 
-                                    n_workers=n_workers, object_ds_name=object_ds_name, urdf_ds_name=urdf_ds_name)
+                                    n_workers=n_workers, object_set=object_set)
     mv_predictor = MultiviewScenePredictor(mesh_db)
 
-    K = np.array([[1905.52, 0.0, 361.142],
-                [0.0, 1902.99, 288.571],
-                [0.0, 0.0, 1.0]])
+    # K = np.array([[1905.52, 0.0, 361.142],
+    #             [0.0, 1902.99, 288.571],
+    #             [0.0, 0.0, 1.0]])
     # K = np.array([[1075.650, 0.0, 360],
     #             [0.0, 1073.903, 270],
     #             [0.0, 0.0, 1.0]])
 
+    # img_paths = [
+    #     '/mnt/trains/users/azad/BM/inputs/cell_4cam/objects_no_clutter_1080_810/cam_23422354_7b334636-3546-4563-a459-845445645ad5_10-02-2021_12-33-06.png', 
+    #     '/mnt/trains/users/azad/BM/inputs/cell_4cam/objects_no_clutter_1080_810/cam_23158292_48aca4b4-b3a5-47bc-8465-c9d5546c47da_10-02-2021_12-33-06.png',
+    #     '/mnt/trains/users/azad/BM/inputs/cell_4cam/objects_no_clutter_1080_810/cam_23124735_4b3cc848-5bcc-4765-9883-54d56d8694de_10-02-2021_12-33-06.png', 
+    #     '/mnt/trains/users/azad/BM/inputs/cell_4cam/objects_no_clutter_1080_810/cam_23124722_8ac6a535-4639-4a65-9766-9db454b687c8_10-02-2021_12-33-06.png',
+    # ]
+
+    org_folder_pth = '/mnt/trains/users/azad/BM/inputs/cell_4cam/objects_no_clutter_1080_810'
+    crop_folder_pth = '/mnt/trains/users/azad/BM/inputs/cropped_top_views/cell_4cam/objects_no_clutter_1080_810'
+    # img_paths = [
+    #     '{}/cam_23422354_7b334636-3546-4563-a459-845445645ad5_10-02-2021_12-33-45.png'.format(org_folder_pth), 
+    #     '{}/cam_23158292_48aca4b4-b3a5-47bc-8465-c9d5546c47da_10-02-2021_12-33-45_2.png'.format(crop_folder_pth),
+    #     '{}/cam_23158292_48aca4b4-b3a5-47bc-8465-c9d5546c47da_10-02-2021_12-33-45_3.png'.format(crop_folder_pth),
+    #     '{}/cam_23124735_4b3cc848-5bcc-4765-9883-54d56d8694de_10-02-2021_12-33-45.png'.format(org_folder_pth), 
+    #     '{}/cam_23124722_8ac6a535-4639-4a65-9766-9db454b687c8_10-02-2021_12-33-45.png'.format(org_folder_pth),
+    # ]
     img_paths = [
-        '/mnt/trains/users/azad/BM/inputs/cell_4cam/rgb_objects_no_clutter/cam_23422354_7b334636-3546-4563-a459-845445645ad5_10-02-2021_12-33-06.png', 
-        '/mnt/trains/users/azad/BM/inputs/cell_4cam/rgb_objects_no_clutter/cam_23158292_48aca4b4-b3a5-47bc-8465-c9d5546c47da_10-02-2021_12-33-06.png',
-        '/mnt/trains/users/azad/BM/inputs/cell_4cam/rgb_objects_no_clutter/cam_23124735_4b3cc848-5bcc-4765-9883-54d56d8694de_10-02-2021_12-33-06.png', 
-        '/mnt/trains/users/azad/BM/inputs/cell_4cam/rgb_objects_no_clutter/cam_23124722_8ac6a535-4639-4a65-9766-9db454b687c8_10-02-2021_12-33-06.png',
-        # '/mnt/trains/users/azad/BM/inputs/cell_4cam/rgb_objects_no_clutter/cam_23422354_7b334636-3546-4563-a459-845445645ad5_10-02-2021_12-32-42.png', 
-        # '/mnt/trains/users/azad/BM/inputs/cell_4cam/rgb_objects_no_clutter/cam_23158292_48aca4b4-b3a5-47bc-8465-c9d5546c47da_10-02-2021_12-32-42.png', #top1
-        # '/mnt/trains/users/azad/BM/inputs/cell_4cam/rgb_objects_no_clutter/cam_23124735_4b3cc848-5bcc-4765-9883-54d56d8694de_10-02-2021_12-32-42.png', #top2
-        # '/mnt/trains/users/azad/BM/inputs/cell_4cam/rgb_objects_no_clutter/cam_23124722_8ac6a535-4639-4a65-9766-9db454b687c8_10-02-2021_12-32-42.png',
-        # '/mnt/trains/users/azad/BM/inputs/cell_4cam/rgb_objects_no_clutter/cam_23422354_7b334636-3546-4563-a459-845445645ad5_10-02-2021_12-32-48.png', #dark1
-        # '/mnt/trains/users/azad/BM/inputs/cell_4cam/rgb_objects_no_clutter/cam_23124722_8ac6a535-4639-4a65-9766-9db454b687c8_10-02-2021_12-32-48.png', #dark2
+        '{}/cam_23422354_7b334636-3546-4563-a459-845445645ad5_10-02-2021_12-33-45.png'.format(org_folder_pth), 
+        '{}/cam_23158292_48aca4b4-b3a5-47bc-8465-c9d5546c47da_10-02-2021_12-33-45_1.png'.format(crop_folder_pth),
+        '{}/cam_23158292_48aca4b4-b3a5-47bc-8465-c9d5546c47da_10-02-2021_12-33-45_2.png'.format(crop_folder_pth),
+        '{}/cam_23158292_48aca4b4-b3a5-47bc-8465-c9d5546c47da_10-02-2021_12-33-45_3.png'.format(crop_folder_pth),
+        '{}/cam_23124735_4b3cc848-5bcc-4765-9883-54d56d8694de_10-02-2021_12-33-45_0.png'.format(crop_folder_pth), 
+        '{}/cam_23124735_4b3cc848-5bcc-4765-9883-54d56d8694de_10-02-2021_12-33-45_2.png'.format(crop_folder_pth), 
+        '{}/cam_23124735_4b3cc848-5bcc-4765-9883-54d56d8694de_10-02-2021_12-33-45_3.png'.format(crop_folder_pth), 
+        '{}/cam_23124722_8ac6a535-4639-4a65-9766-9db454b687c8_10-02-2021_12-33-45.png'.format(org_folder_pth),
     ]
-    img_paths = [
-        '/mnt-ssd/datasets/BM/kuatless_v3/test_pbr/000000/rgb/000004.jpg', 
-        '/mnt-ssd/datasets/BM/kuatless_v3/test_pbr/000000/rgb/000005.jpg', 
-        '/mnt-ssd/datasets/BM/kuatless_v3/test_pbr/000000/rgb/000008.jpg', 
-        '/mnt-ssd/datasets/BM/kuatless_v3/test_pbr/000000/rgb/000010.jpg',
-    ]
-    save_dir = '/mnt/trains/users/azad/BM/multiview_results/ransac'
+
+    calib_path = '/'.join(org_folder_pth.split('/')[:-1])
+    calibration = json.loads(Path('{}/calibration.json'.format(calib_path)).read_text())
+
+    save_dir = '/mnt/trains/users/azad/BM/results/mv_8view'
     os.makedirs(save_dir, exist_ok=True)
 
     n_views = len(img_paths)
     skip_mv = n_views < 2
     view_ids = list(range(n_views))
 
-    detections = [bm_detector.get_detection(img_path) for img_path in img_paths]
+    detections = []
+    segmentations = []
+    for img_path in img_paths:
+        det, seg = bm_detector.get_detection(img_path)
+        detections.append(det)
+        segmentations.append(seg)
+
     infos = []
     for i, det in enumerate(detections):
         infos.append(
@@ -251,12 +286,40 @@ def main():
     images = torch.from_numpy(images).cuda().float()
     images = images.permute(0, 3, 1, 2) / 255
 
-    # cams = np.repeat(K[np.newaxis,:,:], 4, axis=0)
-    K1 = compute_intrinsic(6719.372067539465, 6787.764172975213, 1590.7857807217506, 1196.5379228742668)
-    K2 = compute_intrinsic(5047.308848350872, 5044.538622084761, 1482.8328107218515, 1134.1452560470157)
-    K3 = compute_intrinsic(5026.484190265724, 5020.441312027096, 1522.9123039464473, 1098.0725284499242)
-    K4 = compute_intrinsic(6819.976509193038, 6822.473739038355, 1517.7673526582266, 988.6879829910563)
-    K_matrices = [K4, K3, K2, K1]
+    # K1 = compute_intrinsic(6719.372067539465, 6787.764172975213, 1590.7857807217506, 1196.5379228742668)
+    # K2 = compute_intrinsic(5047.308848350872, 5044.538622084761, 1482.8328107218515, 1134.1452560470157)
+    # K3 = compute_intrinsic(5026.484190265724, 5020.441312027096, 1522.9123039464473, 1098.0725284499242)
+    # K4 = compute_intrinsic(6819.976509193038, 6822.473739038355, 1517.7673526582266, 988.6879829910563)
+    # K_matrices = [K4, K3, K2, K1]
+    K_matrices = []
+    for img_path in img_paths:
+        img_name = img_path.split('/')[-1]
+        cam_coeff = get_cam_coeff(img_name, calibration)
+
+        name_splits = img_name.split('_')
+        if len(name_splits) == 4: # not cropped images
+            K = compute_intrinsic(cam_coeff, input_dim)
+        else: #ends with _0.png, _1.png ...
+            K = np.array([[cam_coeff[0], 0.0, cam_coeff[2]],
+                            [0.0, cam_coeff[1], cam_coeff[3]],
+                            [0.0, 0.0, 1.0]])
+            if name_splits[-1][0] == '0':
+                K[0][2] -= 744
+                K[1][2] -= 467
+            elif name_splits[-1][0] == '1':
+                K[0][2] -= 1244
+                K[1][2] -= 467
+            elif name_splits[-1][0] == '2':
+                K[0][2] -= 744
+                K[1][2] -= 787
+            elif name_splits[-1][0] == '3':
+                K[0][2] -= 1244
+                K[1][2] -= 787
+            else:
+                raise ValueError(name_splits[-1][0])
+
+        K_matrices.append(K)
+
     cams = np.stack(K_matrices)
     cams = torch.from_numpy(cams).cuda().float()    
     cam_info = pd.DataFrame({
@@ -298,9 +361,6 @@ def main():
     all_predictions = OrderedDict({k: v for k, v in sorted(all_predictions.items(), key=lambda item: item[0])})
     results = gather_predictions(all_predictions)
 
-    # os.makedirs(save_dir, exist_ok=False)
-    # torch.save(results, save_dir / 'results.pth.tar')
-
     renderer = BulletSceneRenderer(urdf_ds_name)
     plotter = Plotter()
     dict_preds = dict()
@@ -326,16 +386,15 @@ def main():
         input_rgb = images_dict[view_id].copy()
         gt_state = dict()
         gt_state['camera'] = dict({'T0C': np.eye(4),
-                                    'K': K_matrices[view_id], 
-                                    'TWC': np.eye(4),
-                                    'resolution': (540, 720),})
+                                    'K': K_matrices[view_id],
+                                    'resolution': input_dim, # SIRASINI TERS DENE
+                                    'TWC': np.eye(4), # TWC'YI BURAYA DA VER
+                                    }) 
         fig_input_im = plotter.plot_image(input_rgb)
 
         # Detections
         detections = this_view_dict_preds['cand_inputs']
-        bboxes = detections.initial_bboxes
-        # bboxes = bboxes + torch.as_tensor(np.random.randint(30, size=((len(bboxes), 4)))).to(bboxes.dtype).to(bboxes.device)
-        detections.bboxes = bboxes
+        detections.bboxes = detections.initial_bboxes
 
         detections = add_colors_to_predictions(detections, colormap_hex)
         fig_detections = plotter.plot_image(input_rgb)
@@ -346,11 +405,15 @@ def main():
         cand_matched = this_view_dict_preds['cand_matched']
         cand_inputs = mark_inliers(cand_inputs, cand_matched)
         # colors = np.array([(1.0, 1.0, 1.0, 1.0) for is_inlier in cand_inputs.infos['is_inlier']])
-        colors = np.array([(0, 1, 0, 0.0) if is_inlier else (0, 0, 1.0, 0.0) for is_inlier in cand_inputs.infos['is_inlier']])
+        colors = np.array([(0, 1.0, 0, 1.0) if is_inlier else (0, 1.0, 1.0, 1.0) for is_inlier in cand_inputs.infos['is_inlier']])
         cand_inputs.infos['color'] = colors.tolist()
 
         cand_rgb_rendered = render_predictions_wrt_camera(renderer, cand_inputs, gt_state['camera'])
+        cand_binary_mask = cand_rgb_rendered > 0
+        cand_binary_mask = np.logical_or(cand_binary_mask[:,:,0], cand_binary_mask[:,:,1], cand_binary_mask[:,:,2])
+        cand_rendered_binary = (cand_binary_mask * 255).astype(np.uint8)
         fig_cand = plotter.plot_overlay(input_rgb.copy(), cand_rgb_rendered)
+        fig_cand = plotter.plot_confidence_scores(fig_cand, detections, cand_rendered_binary, segmentations[view_id])
 
         # Scene reconstruction
         ba_outputs = this_view_dict_preds['ba_output']
@@ -362,16 +425,16 @@ def main():
         # ba_outputs = add_colors_to_predictions(ba_outputs, colormap_rgb_3d)
         ba_outputs.infos['color'] = [(0, 1.0, 0, 0.0) for i in range(len(ba_outputs))]
         outputs_rgb_rendered = render_predictions_wrt_camera(renderer, ba_outputs, gt_state['camera'])
+        outputs_binary_mask = outputs_rgb_rendered > 0
+        outputs_binary_mask = np.logical_or(outputs_binary_mask[:,:,0], outputs_binary_mask[:,:,1], outputs_binary_mask[:,:,2])
+        outputs_rendered_binary = (outputs_binary_mask * 255).astype(np.uint8)
         fig_outputs = plotter.plot_overlay(input_rgb.copy(), outputs_rgb_rendered)
+        fig_outputs = plotter.plot_confidence_scores(fig_outputs, detections, outputs_rendered_binary, segmentations[view_id])
 
         fig_array = [fig_input_im, fig_detections, fig_cand, fig_outputs]
         res = gridplot(fig_array, ncols=2)
         img_name = img_paths[view_id].split('/')[-1].split('.')[0]
         export_png(res, filename = os.path.join(save_dir, '{}.png'.format(img_name)))
-        # export_png(fig_input_im, filename = os.path.join(save_dir, 'input_im_{}.png'.format(view_id)))
-        # export_png(fig_detections, filename = os.path.join(save_dir, 'detections_{}.png'.format(view_id)))
-        # export_png(fig_cand, filename = os.path.join(save_dir, 'cand_{}.png'.format(view_id)))
-        # export_png(fig_outputs, filename = os.path.join(save_dir, 'outputs_{}.png'.format(view_id)))
         del fig_input_im, fig_detections, fig_cand, fig_outputs
 
 if __name__ == '__main__':

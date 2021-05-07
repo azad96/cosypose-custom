@@ -24,7 +24,6 @@ def h_pose(model, mesh_db, data, meters,
     TCO_gt = cast(data.TCO).float()
     labels = np.array([obj['name'] for obj in data.objects])
     bboxes = cast(data.bboxes).float()
-
     meshes = mesh_db.select(labels)
     points = meshes.sample_points(cfg.n_points_loss, deterministic=False)
     TCO_possible_gt = TCO_gt.unsqueeze(1) @ meshes.symmetries

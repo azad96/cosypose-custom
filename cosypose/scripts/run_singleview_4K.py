@@ -109,7 +109,7 @@ def get_cam_coeff(img_name, calibration):
 
 
 def main():
-    urdf_ds_name = 'kuartis.cad'
+    urdf_ds_name = 'kuatless.cad'
     input_dim = (1080, 810)
     # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-168790' # v3 epoch 60
     # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-306798' # v5.3 epoch 170

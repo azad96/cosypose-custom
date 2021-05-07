@@ -32,6 +32,7 @@ class PosePredictor(nn.Module):
         self.heads = dict()
         self.pose_fc = nn.Linear(n_features, pose_dim, bias=True)
         self.heads['pose'] = self.pose_fc
+
         self.debug = False
         self.tmp_debug = dict()
 
@@ -78,12 +79,16 @@ class PosePredictor(nn.Module):
         return TCO_updated
 
     def net_forward(self, x):
+        # print('before backbone {}'.format(x.shape))
         x = self.backbone(x)
+        # print('after backbone {}'.format(x.shape))
         x = x.flatten(2).mean(dim=-1)
+        # print('after flatten {}'.format(x.shape))
+
         outputs = dict()
         for k, head in self.heads.items():
             outputs[k] = head(x)
-        return outputs, x
+        return outputs
 
     def forward(self, images, K, labels, TCO, n_iterations=1):
         bsz, nchannels, h, w = images.shape
@@ -102,7 +107,7 @@ class PosePredictor(nn.Module):
 
             x = torch.cat((images_crop, renders), dim=1)
 
-            model_outputs, feat = self.net_forward(x)
+            model_outputs = self.net_forward(x)
 
             TCO_output = self.update_pose(TCO_input, K_crop, model_outputs['pose'])
 
@@ -111,7 +116,6 @@ class PosePredictor(nn.Module):
                 'TCO_output': TCO_output,
                 'K_crop': K_crop,
                 'model_outputs': model_outputs,
-                'features' : feat,
                 'boxes_rend': boxes_rend,
                 'boxes_crop': boxes_crop,
             }

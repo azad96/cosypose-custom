@@ -1,3 +1,4 @@
+from logging import raiseExceptions
 from sklearn.metrics import average_precision_score
 import numpy as np
 import xarray as xr
@@ -51,6 +52,11 @@ class PoseErrorMeter(Meter):
             assert self.errors_bsz == 1 and sample_n_points is None
 
     def compute_errors(self, TXO_pred, TXO_gt, labels):
+        '''
+        TXO_pred: torch.Size([1, 4, 4])
+        TXO_gt: torch.Size([1, 4, 4])
+        labels: array(['obj_000001'], dtype=object)
+        '''
         meshes = self.mesh_db.select(labels)
 
         if self.exact_meshes:
@@ -222,7 +228,6 @@ class PoseErrorMeter(Meter):
         preds_match_merge = xr_merge(preds, matches, on=group_keys+['pred_inst_id'],
                                      dim1='pred_id', dim2='match_id', fill_value=fill_values)
         preds['0.1d'] = 'pred_id', preds_match_merge['0.1d']
-
         self.datas['gt_df'].append(gt)
         self.datas['pred_df'].append(preds)
         self.datas['matches_df'].append(matches)
@@ -317,6 +322,5 @@ class PoseErrorMeter(Meter):
                 'AUC/objects/mean': gt_df['AUC/objects/mean'].item(),
                 'AUC': gt_df['AUC'].item(),
             })
-
         dfs = dict(gt=gt_df, matches=matches_df, preds=pred_df, ap=ap_dfs)
         return summary, dfs

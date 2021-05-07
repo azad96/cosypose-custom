@@ -35,6 +35,8 @@ def build_index(ds_dir, save_file, split, save_file_annotations):
 
     for scene_dir in base_dir.iterdir():
         scene_id = scene_dir.name
+        if scene_id == 'test_primesense_ssd.json':
+            continue
         annotations_scene = dict()
         for f in ('scene_camera.json', 'scene_gt_info.json', 'scene_gt.json'):
             path = (scene_dir / f)
@@ -73,7 +75,6 @@ class BOPDataset:
             split=split)
         self.frame_index = pd.read_feather(save_file_index).reset_index(drop=True)
         self.annotations = pickle.loads(save_file_annotations.read_bytes())
-
         models_infos = json.loads((ds_dir / 'models' / 'models_info.json').read_text())
         self.all_labels = [f'obj_{int(obj_id):06d}' for obj_id in models_infos.keys()]
         self.load_depth = load_depth

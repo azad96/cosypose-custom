@@ -31,7 +31,7 @@ def convert_obj_dataset_to_urdfs(obj_ds_name, texture_size=(1024, 1024), n_faces
 
 def main():
     parser = argparse.ArgumentParser('3D ply object models -> pybullet URDF converter')
-    parser.add_argument('--models', default='', type=str)
+    parser.add_argument('--models', default='kuatless.cad', type=str, required=True)
     args = parser.parse_args()
     convert_obj_dataset_to_urdfs(args.models)
 

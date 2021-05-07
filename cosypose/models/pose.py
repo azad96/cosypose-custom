@@ -31,6 +31,7 @@ class PosePredictor(nn.Module):
 
         self.heads = dict()
         self.pose_fc = nn.Linear(n_features, pose_dim, bias=True)
+        self.fc1 = nn.Linear(n_features, 1, bias=True)
         self.heads['pose'] = self.pose_fc
         self.debug = False
         self.tmp_debug = dict()
@@ -83,7 +84,9 @@ class PosePredictor(nn.Module):
         outputs = dict()
         for k, head in self.heads.items():
             outputs[k] = head(x)
-        return outputs, x
+        conf = self.fc1(x)
+        conf = torch.sigmoid(conf)
+        return outputs, x, conf
 
     def forward(self, images, K, labels, TCO, n_iterations=1):
         bsz, nchannels, h, w = images.shape
@@ -102,7 +105,7 @@ class PosePredictor(nn.Module):
 
             x = torch.cat((images_crop, renders), dim=1)
 
-            model_outputs, feat = self.net_forward(x)
+            model_outputs, feat, conf = self.net_forward(x)
 
             TCO_output = self.update_pose(TCO_input, K_crop, model_outputs['pose'])
 
@@ -111,6 +114,7 @@ class PosePredictor(nn.Module):
                 'TCO_output': TCO_output,
                 'K_crop': K_crop,
                 'model_outputs': model_outputs,
+                'confidence_output': conf,
                 'features' : feat,
                 'boxes_rend': boxes_rend,
                 'boxes_crop': boxes_crop,

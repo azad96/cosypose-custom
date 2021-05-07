@@ -155,7 +155,7 @@ def main():
     detector, pose_predictor, icp_refiner = getModel(coarse_run_id, refiner_run_id, coarse_epoch, refiner_epoch)
     bm_detector = BMDetector()
 
-    urdf_ds_name = 'kuartis.cad'
+    urdf_ds_name = 'kuatless.cad'
     renderer = BulletSceneRenderer(urdf_ds_name)
     
     K = np.array([[1905.52, 0.0, 361.142],
