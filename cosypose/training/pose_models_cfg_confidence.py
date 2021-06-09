@@ -4,7 +4,7 @@ from cosypose.models.wide_resnet import WideResNet18, WideResNet34
 from cosypose.models.flownet import flownet_pretrained
 
 # Pose models
-from cosypose.models.pose_org import PosePredictor
+from cosypose.models.pose import PosePredictor
 
 from cosypose.utils.logging import get_logger
 logger = get_logger(__name__)

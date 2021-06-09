@@ -19,8 +19,8 @@ from cosypose.utils.distributed import init_distributed_mode, get_world_size
 from cosypose.lib3d import Transform
 
 from cosypose.lib3d.rigid_mesh_database import MeshDataBase
-from cosypose.training.pose_models_cfg_org import create_model_refiner, create_model_coarse, check_update_config
-from cosypose.integrated.pose_predictor_org import CoarseRefinePosePredictor
+from cosypose.training.pose_models_cfg import create_model_refiner, create_model_coarse, check_update_config
+from cosypose.integrated.pose_predictor import CoarseRefinePosePredictor
 from cosypose.rendering.bullet_batch_renderer import BulletBatchRenderer
 from cosypose.integrated.multiview_predictor import MultiviewScenePredictor
 
@@ -186,7 +186,7 @@ def main():
     init_distributed_mode()
 
     parser = argparse.ArgumentParser('Evaluation')
-    parser.add_argument('--config', default='kuatless-1080-810', type=str, required=True)
+    parser.add_argument('--config', default='kuatless-test-1080-810', type=str, required=True)
     parser.add_argument('--comment', type=str, required=True)
     parser.add_argument('--nviews', dest='n_views', default=1, type=int, required=True)
     args = parser.parse_args()
@@ -204,12 +204,10 @@ def main():
     # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-306798' # v5.3 epoch 170
     # coarse_run_id = 'bop-kuatless-coarse-v6' # v6 epoch 140
     # coarse_run_id = 'bop-kuatless-coarse-785678' # v9 epoch 190
-    # coarse_run_id = 'bop-bm-coarse-v1-51375' # epoch 100
-    # coarse_run_id = 'bop-bm2-coarse-v1-942603' # epoch 320
-    # coarse_run_id = 'bop-bm2-coarse-mix-990393'
-    # coarse_run_id = 'bop-kuatless-coarse-noise4-766450'
-    coarse_run_id = 'bop-kuatless-coarse-noise5-114693'
-    coarse_epoch = 120
+    # coarse_run_id = 'bop-kuatless-coarse-n20-981893' # epoch 150
+    # coarse_run_id = 'bop-kuatless-coarse-n25-284510' # epoch 130
+    coarse_run_id = 'bop-kuatless-coarse-332k-v6' # epoch 90
+    coarse_epoch = 90
     n_coarse_iterations = 1
 
     refiner_run_id = None
@@ -219,14 +217,16 @@ def main():
     # refiner_run_id = 'bop-tless-kuartis-refiner--689761' # v4 epoch 20 but 100 seems better
     # refiner_run_id = 'bop-tless-kuartis-refiner--143806' # v5.1 epoch 200
     # refiner_run_id = 'bop-kuatless-refiner-v5.2' # v5.2 epoch 180
-    refiner_epoch = 0
-    n_refiner_iterations = 0
+    refiner_run_id = 'bop-kuatless-refiner-332k-v6' # epoch 50
+    refiner_epoch = 50
+    n_refiner_iterations = 1
 
     ds_type, test_type, w, h = args.config.split('-') # kuatless-test-1080-810
     ds_name = '{}.{}_pbr_{}_{}'.format(ds_type, test_type, w, h) # kuatless.test_pbr_1080_810
     pickle_file = '{}_{}_{}_{}.pkl'.format(ds_type, test_type, w, h) # kuatless_test_1080_810.pkl
     object_set = ds_type
-    
+    logger.info(f"DS NAME: {ds_name}")
+
     save_dir = RESULTS_DIR / f'{args.config}-n_views={n_views}-{args.comment}'
     logger.info(f"SAVE DIR: {save_dir}")
     logger.info(f"Coarse: {coarse_run_id}")
@@ -236,7 +236,8 @@ def main():
     scene_ds = make_scene_dataset(ds_name)
 
     # Predictions
-    predictor, mesh_db = load_models(coarse_run_id, refiner_run_id, coarse_epoch=coarse_epoch, refiner_epoch=refiner_epoch,
+    predictor, mesh_db = load_models(coarse_run_id, refiner_run_id, 
+                                    coarse_epoch=coarse_epoch, refiner_epoch=refiner_epoch,
                                     n_workers=n_plotters, object_set=object_set)
 
     mv_predictor = MultiviewScenePredictor(mesh_db)
@@ -289,7 +290,8 @@ def main():
     predictions_to_evaluate = set()
     det_key = 'pix2pose_detections'
     predictions_to_evaluate.add(f'{det_key}/coarse/iteration={n_coarse_iterations}')
-    # predictions_to_evaluate.add(f'{det_key}/refiner/iteration={n_refiner_iterations}')
+    if refiner_run_id:
+        predictions_to_evaluate.add(f'{det_key}/refiner/iteration={n_refiner_iterations}')
 
     if args.n_views > 1:
         for k in [
@@ -328,15 +330,17 @@ def main():
         f'{det_key}/coarse/iteration={n_coarse_iterations}/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Singleview/ADD-S<0.1d',
         f'{det_key}/coarse/iteration={n_coarse_iterations}/ADD-S_ntop=ALL_matching=BOP/mAP': f'Singleview/mAP@ADD-S<0.1d',
 
-
-        # f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Singleview/AUC of ADD-S',
-        # f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Singleview/ADD-S<0.1d',
-        # f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=ALL_matching=BOP/mAP': f'Singleview/mAP@ADD-S<0.1d',
-
         # f'{det_key}/ba_output+all_cand/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Multiview (n={args.n_views})/AUC of ADD-S',
         # f'{det_key}/ba_output+all_cand/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Multiview (n={args.n_views})/ADD-S<0.1d',
         # f'{det_key}/ba_output+all_cand/ADD-S_ntop=ALL_matching=BOP/mAP': f'Multiview (n={args.n_views}/mAP@ADD-S<0.1d)',
     })
+
+    if refiner_run_id:
+        metrics_to_print.update({
+            f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=OVERLAP/AUC/objects/mean': f'Singleview/AUC of ADD-S',
+            f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=BOP_matching=BOP/0.1d': f'Singleview/ADD-S<0.1d',
+            f'{det_key}/refiner/iteration={n_refiner_iterations}/ADD-S_ntop=ALL_matching=BOP/mAP': f'Singleview/mAP@ADD-S<0.1d',
+        })
 
     metrics_to_print.update({
         f'{det_key}/ba_input/ADD-S_ntop=BOP_matching=OVERLAP/norm': f'Multiview before BA/ADD-S (m)',

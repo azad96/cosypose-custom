@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from torch import nn
 
 from cosypose.lib3d.cosypose_ops import TCO_init_from_boxes, TCO_init_from_boxes_zup_autodepth
 from cosypose.lib3d.transform_ops import add_noise
@@ -16,7 +17,7 @@ def cast(obj):
 
 def h_pose(model, mesh_db, data, meters,
            cfg, n_iterations=1, input_generator='fixed'):
-
+    # confidence_loss_func = nn.MSELoss()
     batch_size, _, h, w = data.images.shape
 
     images = cast(data.images).float() / 255.
@@ -24,6 +25,7 @@ def h_pose(model, mesh_db, data, meters,
     TCO_gt = cast(data.TCO).float()
     labels = np.array([obj['name'] for obj in data.objects])
     bboxes = cast(data.bboxes).float()
+
     meshes = mesh_db.select(labels)
     points = meshes.sample_points(cfg.n_points_loss, deterministic=False)
     TCO_possible_gt = TCO_gt.unsqueeze(1) @ meshes.symmetries
@@ -53,6 +55,7 @@ def h_pose(model, mesh_db, data, meters,
         TCO_input = iter_outputs['TCO_input']
         TCO_pred = iter_outputs['TCO_output']
         model_outputs = iter_outputs['model_outputs']
+        feat = iter_outputs['features']
 
         if cfg.loss_disentangled:
             if cfg.n_pose_dims == 9:
@@ -78,6 +81,24 @@ def h_pose(model, mesh_db, data, meters,
 
     loss_TCO = torch.cat(losses_TCO_iter).mean()
     loss = loss_TCO
+
     meters['loss_TCO'].add(loss_TCO.item())
     meters['loss_total'].add(loss.item())
-    return loss
+    return loss, feat, losses_TCO_iter[-1]
+
+
+def calculate_confidence_gt(tco_loss):
+    our_list = []
+    thres = 0.015
+    for i in range(len(tco_loss[0])):
+        if tco_loss[0][i].item() > thres:
+            our_list.append(thres)
+        else:
+            our_list.append(tco_loss[0][i].item())
+    our_list = torch.tensor(our_list).cuda()
+    our_list -= thres/2
+    our_list *= (-6/(thres/2))
+    #print("Our List {}".format(our_list))
+    confidence_gt_prob = torch.sigmoid(our_list)
+    confidence_gt_prob = confidence_gt_prob.to(torch.float32)
+    return confidence_gt_prob

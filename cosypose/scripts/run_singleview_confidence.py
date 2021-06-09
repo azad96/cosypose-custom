@@ -1,7 +1,5 @@
-from pickle import NONE
-from cosypose.scripts.run_multiview_n import compute_intrinsic
 import sys
-sys.path.append("/mnt/trains/users/botan/GAG/mmdetection")
+sys.path.append("/mnt/trains/users/azad/mmdetection")
 from  bm_scripts.bm_inference_azad import BMDetector
 import os
 import torch
@@ -11,6 +9,7 @@ import yaml
 import time
 import json
 from pathlib import Path
+from math import ceil 
 
 from cosypose.config import EXP_DIR
 from cosypose.datasets.datasets_cfg import make_object_dataset
@@ -18,9 +17,7 @@ from cosypose.datasets.datasets_cfg import make_object_dataset
 # Pose estimator
 from cosypose.lib3d.rigid_mesh_database import MeshDataBase
 from cosypose.training.pose_models_cfg import create_model_refiner, create_model_coarse, check_update_config
-# from cosypose.training.pose_models_cfg_org import create_model_refiner, create_model_coarse, check_update_config
 from cosypose.integrated.pose_predictor import CoarseRefinePosePredictor
-# from cosypose.integrated.pose_predictor_org import CoarseRefinePosePredictor
 from cosypose.rendering.bullet_batch_renderer import BulletBatchRenderer
 
 # From Notebook
@@ -32,17 +29,6 @@ from bokeh.plotting import gridplot
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
-
-def load_confidence_mode(model, ckpt):
-    pth = "/mnt/trains/users/azad/BM/cosypose/local_data/experiments/bop-kuatless-coarse--610906/conf_weights4/weight_099.pth"
-    ckpt2 = torch.load(pth)
-    ckpt2 = ckpt2["model"]
-    ckpt["fc1.weight"] = ckpt2["fc1.weight"]
-    ckpt["fc1.bias"] = ckpt2["fc1.bias"]
-    model.load_state_dict(ckpt)
-    # breakpoint()
-    return model
 
 
 def load_pose_models(coarse_run_id, refiner_run_id=None, coarse_epoch=None, refiner_epoch=None, n_workers=8):
@@ -68,11 +54,7 @@ def load_pose_models(coarse_run_id, refiner_run_id=None, coarse_epoch=None, refi
             model = create_model_coarse(cfg, renderer=renderer, mesh_db=mesh_db_batched)
             ckpt = torch.load(run_dir / checkpoint)
         ckpt = ckpt['state_dict']
-
-        #TODO(BOTAN): Update this loading...
-        # model.load_state_dict(ckpt)
-        model = load_confidence_mode(model, ckpt)
-
+        model.load_state_dict(ckpt)
         model = model.cuda().eval()
         model.cfg = cfg
         return model
@@ -104,7 +86,7 @@ def compute_intrinsic(cam_coeff, input_dim):
         coeff = 2/7
     else:
         raise ValueError(input_dim)
-
+    
     fx, fy, cx, cy = cam_coeff[:4]
     new_fx = fx*coeff
     new_fy = fy*coeff
@@ -126,15 +108,27 @@ def get_cam_coeff(img_name, calibration):
 def main():
     urdf_ds_name = 'kuatless.cad'
     input_dim = (1080, 810)
-    coarse_run_id = 'bop-kuatless-coarse--610906' # v6 epoch 140
-    coarse_epoch = 190
+    # coarse_run_id = 'bop-tless-kuartis-coarse-transnoise-zxyavg-306798' # v5.3 epoch 170
+    # coarse_run_id = 'bop-kuatless-coarse-v6' # v6 epoch 140 cosypose pretrained
+    # coarse_run_id = 'bop-kuatless-coarse--865501' # v7 epoch 120 
+    # coarse_run_id = 'bop-bm-coarse-v1-51375' # epoch 100 
+    # coarse_run_id = 'bop-bm2-coarse-v1-942603' # epoch 320
+    # coarse_run_id = 'bop-kuatless-coarse-noise4-766450'
+    # coarse_run_id = 'bop-kuatless-coarse-noise5-114693'
+    # coarse_run_id = 'bop-kuatless-coarse-noise-132k-582997'
+    # coarse_run_id = 'bop-kuatless-coarse-noise-132k-v2-955393'
+    # coarse_run_id = 'bop-kuatless-coarse-noise-139k-fresh-766954' # n 5 epoch 140
+    # coarse_run_id = 'bop-kuatless-coarse-n20-981893' # epoch 150
+    # coarse_run_id = 'bop-kuatless-coarse-n25-284510' # epoch 130
+    coarse_run_id = 'bop-kuatless-coarse-332k-v6' # epoch 90
+    coarse_epoch = 20
     n_coarse_iterations = 1
 
-    # refiner_run_id = 'bop-tless-kuartis-refiner--243227' # v3 epoch 90
-    # refiner_run_id = 'bop-tless-kuartis-refiner--842437' # v5.2 epoch 180
-    refiner_run_id = None
-    refiner_epoch = 0
-    n_refiner_iterations = 0
+    # refiner_run_id = 'bop-kuatless-refiner-v5.2' # v5.2 epoch 180
+    # refiner_run_id = 'bop-kuatless-refiner-332k-766948' # epoch 50
+    refiner_run_id = 'bop-kuatless-refiner-332k-v6' # epoch 50
+    refiner_epoch = 50
+    n_refiner_iterations = 1
 
     bm_detector = BMDetector()
     pose_predictor, _ = load_pose_models(coarse_run_id=coarse_run_id, refiner_run_id=refiner_run_id,
@@ -142,30 +136,31 @@ def main():
     renderer = BulletSceneRenderer(urdf_ds_name)
     plotter = Plotter()
 
-    # K = np.array([[1905.52, 0.0, 361.142],
-    #                 [0.0, 1902.99, 288.571],
-    #                 [0.0, 0.0, 1.0]])
-
     input_folders = [
-        #  'cell_4cam/workingplane_1080_810',
-        #  'cell_4cam/objects_no_clutter_1080_810',
-         'cell_4cam/objects_1080_810',
-        #  'bracket_mix/object_mix3_1080_810',
-        #  'bracket_mix/object_mix2_1080_810',
-        #  'bracket_mix/object_mix1_1080_810',
-        #  'bracket/object_1080_810', 
+        'cell_4cam/workingplane_1080_810',
+        # 'cell_4cam/objects_no_clutter_1080_810',
+        # 'cell_4cam/objects_1080_810',
+        # 'bracket_mix/object_mix3_1080_810',
+        # 'bracket_mix/object_mix2_1080_810',
+        # 'bracket_mix/object_mix1_1080_810',
+        # 'bracket/object_1080_810', 
+        # '1080_810/channel_bracket_A',
+        # '1080_810/screw_terminal',
     ]
     total_time = 0.0
     image_count = 0
     start_time = time.time()
     for folder_name in input_folders:
         folder_pth = '/mnt/trains/users/azad/BM/inputs/{}'.format(folder_name)
-        # save_dir = '/mnt/trains/users/azad/BM/results/v7.2.3/{}'.format(folder_name)
-        save_dir = '/mnt/trains/users/azad/BM/results/confidence_deneme/{}'.format(folder_name)
+        save_dir = '/mnt/trains/users/azad/BM/results/332k_v6_epoch20/{}'.format(folder_name)
         os.makedirs(save_dir, exist_ok=True)
+
+        print(folder_pth)
 
         file_names = os.listdir(folder_pth)
         img_names = [file_name for file_name in file_names if file_name.endswith('.png') or file_name.endswith('.jpg')]
+        img_names = sorted(img_names)
+        # img_names = img_names[:len(img_names):2]
         img_paths = [os.path.join(folder_pth, img_name) for img_name in img_names]
         image_count += len(img_names)
         
@@ -178,7 +173,7 @@ def main():
 
             cam_coeff = get_cam_coeff(img_name, calibration)
             K = compute_intrinsic(cam_coeff, input_dim)
-            # K = compute_intrinsic(6669.321193740538, 6660.46518407379, 1548.8243783047435, 1097.8682142269727)
+
             cam = dict(
                 resolution=input_dim,
                 K=K,
@@ -187,8 +182,16 @@ def main():
 
             t0 = time.time()
             detections, segmentation = bm_detector.get_detection(img_path)
-            # cond = [(bbox[3] - bbox[1] < 250).item() for bbox in detections.bboxes]
-            # detections = detections[cond]
+            # img_seg = Image.fromarray(segmentation)
+            # img_seg.save('{}/{}'.format(seg_save_dir, img_name))
+            # conds = [bbox[1] != 0 and ceil(bbox[2]) != input_dim[0] and 
+            #          bbox[0] != 0 and ceil(bbox[3]) != input_dim[1] for bbox in detections.bboxes]
+            # conds = [cond.item() if type(cond) == torch.Tensor else cond for cond in conds]
+            # conds = [(bbox[1] == 0 and ceil(bbox[2]) == input_dim[0]) or 
+            #         (bbox[0] == 0 and ceil(bbox[3]) == input_dim[1]) 
+            #         for bbox in detections.bboxes]
+            # conds = [not cond.item() if type(cond) == torch.Tensor else not cond for cond in conds ]
+            # detections = detections[conds]
             t1 = time.time()
             pred = inference(pose_predictor, img, K, detections, n_coarse_iterations, n_refiner_iterations)
             t2 = time.time()
@@ -198,12 +201,15 @@ def main():
 
             figures = dict()
             figures['input_im'] = plotter.plot_image(img)
-            fig_dets = plotter.plot_image(img)
-            figures['detections'] = plotter.plot_maskrcnn_bboxes(fig_dets, detections)
+            img_seg = plotter.plot_segm_overlay(img, segmentation)
+            figures['detections'] = plotter.plot_maskrcnn_bboxes(img_seg, detections)
+
+            binary_mask = pred_rendered[:,:,0] > 0
+            pred_rendered_binary = (binary_mask * 255).astype(np.uint8)
             
             figures['pred_rendered'] = plotter.plot_image(pred_rendered)
             figures['pred_overlay'] = plotter.plot_overlay(img, pred_rendered)           
-            figures['pred_overlay'] = plotter.plot_new_confidence_scores(figures['pred_overlay'], detections, pred.confidence_output)
+            figures['pred_overlay'] = plotter.plot_confidence_scores(figures['pred_overlay'], detections, pred_rendered_binary, segmentation)
             fig_array = [figures['input_im'], figures['detections'], figures['pred_rendered'], figures['pred_overlay']]
             res = gridplot(fig_array, ncols=2)
             export_png(res, filename = os.path.join(save_dir, img_name))

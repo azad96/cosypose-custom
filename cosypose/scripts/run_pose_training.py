@@ -3,7 +3,7 @@ import numpy as np
 import os
 from colorama import Fore, Style
 
-from cosypose.training.train_pose_org import train_pose
+from cosypose.training.train_pose import train_pose
 from cosypose.utils.logging import get_logger
 from cosypose.bop_config import BOP_CONFIG
 logger = get_logger(__name__)
@@ -39,20 +39,25 @@ def make_cfg(args):
     cfg.n_pose_dims = 9
     cfg.n_rendering_workers = 0
     cfg.refiner_run_id_for_test = None
-    cfg.coarse_run_id_for_test = None
-    cfg.run_id_pretrain = 'coarse-bop-tless-pbr--506801' 
+    cfg.refiner_test_epoch = None
+    cfg.coarse_run_id_for_test = 'bop-kuatless-coarse-332k-v6'
+    cfg.coarse_test_epoch = 90
+    # cfg.run_id_pretrain = 'coarse-bop-tless-pbr--506801' 
     # cfg.run_id_pretrain = 'bop-kuatless-coarse-noise-874436' 
     # cfg.run_id_pretrain = 'bop-kuatless-coarse-noise2-824870' 
     # cfg.run_id_pretrain = 'bop-kuatless-coarse-noise3-481715' 
     # cfg.run_id_pretrain = 'bop-kuatless-coarse-noise-132k-582997' 
-    cfg.pretrain_epoch = None
-    cfg.use_cosypose_model = True
+    # cfg.run_id_pretrain = 'bop-kuatless-coarse-v5.3' # epoch 160
+    # cfg.run_id_pretrain = 'bop-kuatless-coarse-v6' # epoch 140
+    cfg.run_id_pretrain = 'bop-kuatless-refiner-v5.2' # v5.2 epoch 180
+    cfg.pretrain_epoch = 180
+    cfg.use_cosypose_model = False
 
     # Optimizer
-    cfg.lr = 3e-4               # adam default: 3e-4, sgd: 3e-2
+    cfg.lr = 3e-6 # adam default: 3e-4, sgd: 3e-2
     cfg.weight_decay = 0.
-    cfg.n_epochs_warmup = 10 # 50
-    cfg.lr_epoch_decay = 150 # 250
+    cfg.n_epochs_warmup = 0 # 50
+    cfg.lr_epoch_decay = 250 # 250
     cfg.clip_grad_norm = 0.5
 
     # Training
@@ -73,7 +78,6 @@ def make_cfg(args):
         bop_cfg = BOP_CONFIG[bop_name]
 
         cfg.train_ds_names = [(bop_cfg['train_pbr_ds_name'][0], 1)]
-        # cfg.test_ds_names = [(bop_cfg['test_pbr_ds_name'][0])]
         cfg.test_ds_names = bop_cfg['test_pbr_ds_name']
         cfg.val_ds_names = cfg.train_ds_names
         cfg.urdf_ds_name = bop_cfg['urdf_ds_name']

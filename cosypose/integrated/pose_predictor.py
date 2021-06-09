@@ -51,7 +51,6 @@ class CoarseRefinePosePredictor(torch.nn.Module):
                 batch_preds = tc.PandasTensorCollection(infos,
                                                         poses=iter_outputs['TCO_output'],
                                                         poses_input=iter_outputs['TCO_input'],
-                                                        confidence_output=iter_outputs['confidence_output'],
                                                         K_crop=iter_outputs['K_crop'],
                                                         boxes_rend=iter_outputs['boxes_rend'],
                                                         boxes_crop=iter_outputs['boxes_crop'])

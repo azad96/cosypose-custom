@@ -1,16 +1,12 @@
-from pickle import NONE
 import sys
+sys.path.append("/mnt/trains/users/azad/mmdetection")
+from bm_scripts.bm_inference_azad import BMDetector
 import os
 import torch
 import numpy as np
 from PIL import Image
 import yaml
 import time
-import json
-from pathlib import Path
-from math import ceil 
-import pandas as pd
-import cosypose.utils.tensor_collection as tc
 
 from cosypose.config import EXP_DIR
 from cosypose.datasets.datasets_cfg import make_object_dataset
@@ -83,8 +79,8 @@ def inference(pose_predictor, image, camera_k, detections, coarse_it=1, refiner_
 def main():
     urdf_ds_name = 'kuatless.cad'
     input_dim = (1080, 810)
-    coarse_run_id = 'bop-kuatless-coarse-noise4-766450'
-    coarse_epoch = 0
+    coarse_run_id = 'bop-kuatless-coarse-noise-139k-fresh-766954'
+    coarse_epoch = 140
     n_coarse_iterations = 1
 
     # refiner_run_id = 'bop-kuatless-refiner-v5.2' # v5.2 epoch 180
@@ -92,6 +88,7 @@ def main():
     refiner_epoch = 0
     n_refiner_iterations = 0
 
+    bm_detector = BMDetector()
     pose_predictor, _ = load_pose_models(coarse_run_id=coarse_run_id, refiner_run_id=refiner_run_id,
                                         coarse_epoch=coarse_epoch, refiner_epoch=refiner_epoch)
     renderer = BulletSceneRenderer(urdf_ds_name)
@@ -110,47 +107,22 @@ def main():
     total_time = 0.0
     start_time = time.time()
 
-    folder_name = '000000'
-    folder_pth = '/mnt-ssd/datasets/BM/kuatless/test_pbr_1080_810/{}/rgb'.format(folder_name)
-    # folder_pth = '/mnt-ssd/datasets/BM/bm2/test_pbr_1080_810/{}/rgb'.format(folder_name)
+    folder_name = '000128'
+    folder_pth = '/mnt-ssd/datasets/BM/kuatless/{}/rgb'.format(folder_name)
     save_dir = '/mnt/trains/users/azad/BM/results/{}'.format(folder_name)
     os.makedirs(save_dir, exist_ok=True)
 
     file_names = os.listdir(folder_pth)
     img_names = [file_name for file_name in file_names if file_name.endswith('.png') or file_name.endswith('.jpg')]
-    img_names = img_names[:5]
+    img_names = img_names[:4]
     img_paths = [os.path.join(folder_pth, img_name) for img_name in img_names]
-    
-    gt_folder = '/'.join(folder_pth.split('/')[:-1])
-    gt_bbox_path = '{}/scene_gt_info.json'.format(gt_folder)
-    bbox_json = json.loads(Path(gt_bbox_path).read_text())
-    gt_obj_path = '{}/scene_gt.json'.format(gt_folder)
-    obj_json = json.loads(Path(gt_obj_path).read_text())
     
     for i, (img_name, img_path) in enumerate(zip(img_names, img_paths)):
         img = Image.open(img_path) 
         img = np.array(img)
 
         t0 = time.time()
-        label = []
-        bboxes = []
-        img_id = str(int(img_name.split('.')[0]))
-        bbox_infos = bbox_json[img_id]
-        obj_infos = obj_json[img_id]
-
-        for obj_it in range(len(bbox_infos)):
-            lbl = 'obj_{:06}'.format(obj_json[img_id][obj_it]['obj_id'])
-            label.append(lbl)
-            bbox = bbox_json[img_id][obj_it]['bbox_obj']
-            bbox[2] += bbox[0]
-            bbox[3] += bbox[1]
-            bboxes.append(bbox)
-
-        bboxes=torch.as_tensor(np.stack(bboxes)).float().cuda()
-        infos = dict(batch_im_id=0,
-                    score=1.0,
-                    label=label)
-        detections = tc.PandasTensorCollection(infos=pd.DataFrame(infos), bboxes=bboxes)
+        detections, segmentation = bm_detector.get_detection(img_path)
         t1 = time.time()
         pred = inference(pose_predictor, img, K, detections, n_coarse_iterations, n_refiner_iterations)
         t2 = time.time()

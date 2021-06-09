@@ -9,7 +9,6 @@ from pathlib import Path
 from torchnet.meter import AverageValueMeter
 from collections import defaultdict
 import torch.distributed as dist
-import os
 
 from cosypose.config import EXP_DIR
 
@@ -21,7 +20,7 @@ from cosypose.datasets.pose_dataset import PoseDataset
 from cosypose.datasets.samplers import PartialSampler, ListSampler
 
 # Evaluation
-from cosypose.integrated.pose_predictor_org import CoarseRefinePosePredictor
+from cosypose.integrated.pose_predictor import CoarseRefinePosePredictor
 from cosypose.evaluation.pred_runner.multiview_predictions import MultiviewPredictionRunner
 from cosypose.evaluation.eval_runner.pose_eval import PoseEvaluation
 from cosypose.evaluation.runner_utils import run_pred_eval
@@ -32,20 +31,19 @@ from cosypose.scripts.run_cosypose_eval import (
 from cosypose.rendering.bullet_batch_renderer import BulletBatchRenderer
 from cosypose.lib3d.rigid_mesh_database import MeshDataBase
 
-from .pose_forward_loss_org import h_pose
-from .pose_models_cfg_org import create_model_pose, check_update_config
+from .pose_forward_loss import h_pose
+from .pose_models_cfg import create_model_pose, check_update_config
 
 
 from cosypose.utils.logging import get_logger
 from cosypose.utils.distributed import get_world_size, get_rank, sync_model, init_distributed_mode, reduce_dict
 from torch.backends import cudnn
-
+import pickle
 cudnn.benchmark = True
 logger = get_logger(__name__)
 
 
-def log(config, model,
-        log_dict, test_dict, epoch):
+def log(config, model, log_dict, test_dict, epoch):
     save_dir = config.save_dir
     save_dir.mkdir(exist_ok=True)
     log_dict.update(epoch=epoch)
@@ -130,22 +128,24 @@ def make_eval_bundle(args, model_training):
         detections = None
         pred_kwargs = dict()
 
-        w, h = args.input_resize
-        ds_folder_name, _ = ds_name.split('.')
-        pickle_file = '{}_test_{}_{}.pkl'.format(ds_folder_name, w, h) # kuatless_test_1080_810.pkl
-        detections = load_kuatless_detection_results(pickle_file=pickle_file,
-                                            remove_incorrect_poses=False).cpu()
-        coarse_detections = load_kuatless_detection_results(pickle_file=pickle_file,
-                                                    remove_incorrect_poses=False).cpu()
-        det_k = 'pix2pose_detections'
-        coarse_k = 'pix2pose_coarse'
+        if 'kuatless' in ds_name:
+            w,h = args.input_resize
+            pickle_file = 'kuatless_test_{}_{}.pkl'.format(w, h)
+            detections = load_kuatless_detection_results(pickle_file=pickle_file,
+                                               remove_incorrect_poses=False).cpu()
+            coarse_detections = load_kuatless_detection_results(pickle_file=pickle_file,
+                                                      remove_incorrect_poses=False).cpu()  ## DIKKAT ET
+            det_k = 'pix2pose_detections'
+            coarse_k = 'pix2pose_coarse'
+        else:
+            raise ValueError(ds_name)
         
         if args.train_refiner and refiner_model is not None:
             pred_kwargs.update({
                 coarse_k: dict(
                     detections=coarse_detections,
                     use_detections_TCO=False,#True,  
-                    n_coarse_iterations=coarse_model.cfg.n_iterations,
+                    n_coarse_iterations=coarse_model.cfg.n_iterations, # 0 normalde
                     n_refiner_iterations=1,
                     **base_pred_kwargs,
                 )
@@ -173,8 +173,7 @@ def make_eval_bundle(args, model_training):
                                      n_workers=args.n_dataloader_workers, sampler=sampler)
 
         save_dir = Path(args.save_dir) / 'eval' / ds_name
-        if dist.get_rank() == 0:
-            save_dir.mkdir(exist_ok=True, parents=True)
+        save_dir.mkdir(exist_ok=True, parents=True)
         eval_bundle[ds_name] = (pred_runner, pred_kwargs, eval_runner, save_dir)
     return eval_bundle
 
@@ -189,13 +188,23 @@ def run_eval(eval_bundle, epoch):
             errors[ds_name] = results['summary']
     return errors
 
-
 def load_pretrained_weights(model, ckpt):
     dummy_weight = torch.nn.Linear(1536, 9, bias=True) ## TODO: Hardcoded numbers
     dummy_weight.cuda()
     dummy_state_dict = dummy_weight.state_dict() 
     ckpt["pose_fc.weight"] = dummy_state_dict['weight']
     ckpt["pose_fc.bias"] = dummy_state_dict['bias']
+    model.load_state_dict(ckpt)
+    return model
+
+def load_pretrained_weights2(model, ckpt):
+    dummy_weight = torch.nn.Linear(1536, 1, bias=True) ## TODO: Hardcoded numbers
+    dummy_weight.cuda()
+    dummy_state_dict = dummy_weight.state_dict() 
+
+    ckpt["confidence_fc.weight"] = dummy_state_dict['weight']
+    ckpt["confidence_fc.bias"] = dummy_state_dict['bias']
+
     model.load_state_dict(ckpt)
     return model
 
@@ -206,10 +215,8 @@ def train_pose(args):
     if args.resume_run_id:
         resume_dir = EXP_DIR / args.resume_run_id
         resume_args = yaml.load((resume_dir / 'config.yaml').read_text())
-        keep_fields = set(['resume_run_id', 'epoch_size', 'lr', 'lr_epoch_decay', 'val_epoch_interval', 'test_epoch_interval',])
+        keep_fields = set(['resume_run_id', 'epoch_size', ])
         vars(args).update({k: v for k, v in vars(resume_args).items() if k not in keep_fields})
-        # keep_fields = set(['run_id', ])
-        # vars(args).update({k: v for k, v in vars(resume_args).items() if k in keep_fields})
 
     args.train_refiner = args.TCO_input_generator == 'gt+noise'
     args.train_coarse = not args.train_refiner
@@ -274,11 +281,15 @@ def train_pose(args):
 
     eval_bundle = make_eval_bundle(args, model)
 
+    if args.run_id_pretrain is not None:
+        # pretrain_path = EXP_DIR / args.run_id_pretrain / 'checkpoint_140.pth.tar' #TODO(BOTAN)
+        pretrain_path = EXP_DIR / args.run_id_pretrain / 'checkpoint.pth.tar'
+        logger.info(f'Using pretrained model from {pretrain_path}.')
+        # ckpt = torch.load(pretrain_path)['state_dict'] #TODO(BOTAN)
+        # model = load_pretrained_weights2(model, ckpt)        #TODO(BOTAN)
+        model.load_state_dict(torch.load(pretrain_path)['state_dict'])
         
-    start_epoch = 0
-    end_epoch = args.n_epochs
     if args.resume_run_id:
-        args.run_id_pretrain = None
         resume_dir = EXP_DIR / args.resume_run_id
         path = resume_dir / 'checkpoint.pth.tar'
         logger.info(f'Loading checkpoing from {path}')
@@ -286,26 +297,16 @@ def train_pose(args):
         state_dict = save['state_dict']
         model.load_state_dict(state_dict)
         start_epoch = save['epoch'] + 1
-        
-    elif args.run_id_pretrain:
-        if args.pretrain_epoch:
-            pretrain_path = EXP_DIR / args.run_id_pretrain / 'checkpoint_{}.pth.tar'.format(args.pretrain_epoch)
-        else:
-            pretrain_path = EXP_DIR / args.run_id_pretrain / 'checkpoint.pth.tar'
-        logger.info(f'Using pretrained model from {pretrain_path}.')
+    else:
+        start_epoch = 0
+    end_epoch = args.n_epochs
 
-        ckpt = torch.load(pretrain_path)['state_dict']    
-        if args.use_cosypose_model:
-            model = load_pretrained_weights(model, ckpt)
-        else:
-            model.load_state_dict(ckpt)
 
     # Synchronize models across processes.
     model = sync_model(model)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device], output_device=device)
 
     # Optimizer
-    # optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     # Warmup
@@ -325,7 +326,9 @@ def train_pose(args):
     lr_scheduler.last_epoch = start_epoch - 1
     lr_scheduler.step()
 
-    start_time = time.time()
+    # features_save_pth = args.save_dir / "features"
+    # features_save_pth.mkdir(exist_ok=True)
+
     for epoch in range(start_epoch, end_epoch):
         meters_train = defaultdict(lambda: AverageValueMeter())
         meters_val = defaultdict(lambda: AverageValueMeter())
@@ -345,7 +348,17 @@ def train_pose(args):
                 optimizer.zero_grad()
 
                 t = time.time()
-                loss = h(data=sample, meters=meters_train)
+                loss, feat, losses_TCO = h(data=sample, meters=meters_train)
+
+                confidence_dict = dict()
+                confidence_dict['feat'] = feat
+                confidence_dict['losses'] = losses_TCO
+                #features_file_save_pth = features_save_pth / "f_{:03}_{:06}_{:06}.pkl".format(get_rank(), epoch, n)
+                #fi = open(features_file_save_pth, "wb")
+                #.dump(confidence_dict, fi)
+                #fi.close()
+
+                
                 meters_time['forward'].add(time.time() - t)
                 iterator.set_postfix(loss=loss.item())
                 meters_train['loss_total'].add(loss.item())
@@ -370,7 +383,7 @@ def train_pose(args):
         def validation():
             model.eval()
             for sample in tqdm(ds_iter_val, ncols=80):
-                loss = h(data=sample, meters=meters_val)
+                loss, feat, losses_TCO = h(data=sample, meters=meters_val)
                 meters_val['loss_total'].add(loss.item())
 
         @torch.no_grad()
@@ -378,17 +391,15 @@ def train_pose(args):
             model.eval()
             return run_eval(eval_bundle, epoch=epoch)
 
+        epoch_start = time.time()
         train_epoch()
+        epoch_end = time.time()
         if epoch % args.val_epoch_interval == 0:
             validation()
 
         test_dict = None
         if epoch % args.test_epoch_interval == 0:
             test_dict = test()
-
-        end_time = time.time()
-        training_time = (end_time - start_time)/3600
-        logger.info(f'Total training time: {training_time} hours')
 
         log_dict = dict()
         log_dict.update({
