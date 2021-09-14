@@ -4,7 +4,7 @@ from cosypose.models.wide_resnet import WideResNet18, WideResNet34
 from cosypose.models.flownet import flownet_pretrained
 
 # Pose models
-from cosypose.models.pose_confidence import PosePredictor
+from cosypose.models.pose_seg import PosePredictor
 
 from cosypose.utils.logging import get_logger
 logger = get_logger(__name__)
@@ -36,10 +36,11 @@ def create_model_pose(cfg, renderer, mesh_db):
 
     logger.info(f'Backbone: {backbone_str}')
     backbone.n_inputs = n_inputs
+    render_size = cfg.render_size
     model = PosePredictor(backbone=backbone,
                           renderer=renderer,
                           mesh_db=mesh_db,
-                          render_size=cfg.render_size,
+                          render_size=render_size,
                           pose_dim=pose_dim)
     return model
 

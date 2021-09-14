@@ -4,8 +4,8 @@ import json
 
 
 
-pth = "/mnt-ssd/datasets/BM/kuatless/test-collision_pbr_1080_810"
-save_pth = "/mnt-ssd/datasets/BM/kuatless/kuatless_test-collision_1080_810.json"
+pth = "/mnt-ssd/datasets/BM/bm3/test_pbr_1080_810"
+save_pth = "/mnt-ssd/datasets/BM/bm3/bm3_test_1080_810.json"
 # pth = "/raid/datasets/Bright_Machines/Bin_Picking/kuatless/test_pbr_1080_810"
 # save_pth = "/raid/datasets/Bright_Machines/Bin_Picking/kuatless/kuatless_test_1080_810.json"
 # pth = "/mnt/trains/users/azad/BM/docker/local_data/bop_datasets/kuatless/test_pbr_1080_810"

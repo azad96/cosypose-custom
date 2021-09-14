@@ -1,12 +1,15 @@
 import sys
 sys.path.append("/mnt/trains/users/azad/mmdetection")
-from bm_scripts.bm_inference_azad import BMDetector
+from  bm_scripts.bm_inference_azad import BMDetector
 import os
 import torch
 import numpy as np
 from PIL import Image
 import yaml
 import time
+import json
+from pathlib import Path
+from math import ceil 
 
 from cosypose.config import EXP_DIR
 from cosypose.datasets.datasets_cfg import make_object_dataset
@@ -79,6 +82,7 @@ def inference(pose_predictor, image, camera_k, detections, coarse_it=1, refiner_
 def main():
     urdf_ds_name = 'bm3.cad'
     input_dim = (1080, 810)
+
     coarse_run_id = 'bop-bm3-coarse-dsg-300643' # epoch 200
     coarse_epoch = 200
     n_coarse_iterations = 1
@@ -87,8 +91,8 @@ def main():
     # refiner_run_id = 'bop-kuatless-refiner-v5.2' # v5.2 epoch 180
     refiner_epoch = 180
     n_refiner_iterations = 1
-
-    if refiner_run_id is None:
+    
+    if not refiner_run_id:
         refiner_epoch = 0
         n_refiner_iterations = 0
 
@@ -98,58 +102,67 @@ def main():
     renderer = BulletSceneRenderer(urdf_ds_name)
     plotter = Plotter()
 
-    K = np.array([[2858.280517578125, 0.0, 541.7142944335938],
-                    [0.0, 2854.485107421875, 432.8571472167969],
-                    [0.0, 0.0, 1.0]])
+    input_folders = [
+        'double_spur_gear/1080_810'
+    ]
 
-    cam = dict(
-        resolution=input_dim,
-        K=K,
-        TWC=np.eye(4)
-    )
+    K = np.array([[1905.52, 0.0, 361.142],
+                [0.0, 1902.99, 288.571],
+                [0.0, 0.0, 1.0]])
 
     total_time = 0.0
+    image_count = 0
     start_time = time.time()
+    for folder_name in input_folders:
+        folder_pth = '/mnt/trains/users/azad/BM/inputs/{}'.format(folder_name)
+        save_dir = '/mnt/trains/users/azad/BM/results/double_spur_gear/{}'.format(folder_name)
+        os.makedirs(save_dir, exist_ok=True)
 
-    folder_name = '000000'
-    folder_pth = '/mnt-ssd/datasets/BM/bm3/test_pbr_1080_810/{}/rgb'.format(folder_name)
-    save_dir = '/mnt/trains/users/azad/BM/results/double_spur_gear/{}'.format(folder_name)
-    os.makedirs(save_dir, exist_ok=True)
+        print(folder_pth)
 
-    file_names = os.listdir(folder_pth)
-    img_names = [file_name for file_name in file_names if file_name.endswith('.png') or file_name.endswith('.jpg')]
-    # img_names = img_names[111:112]
-    img_names = sorted(img_names)[::150]
-    img_paths = [os.path.join(folder_pth, img_name) for img_name in img_names]
-    
-    for i, (img_name, img_path) in enumerate(zip(img_names, img_paths)):
-        img = Image.open(img_path) 
-        img = np.array(img)
+        file_names = os.listdir(folder_pth)
+        img_names = [file_name for file_name in file_names if file_name.endswith('.png') or file_name.endswith('.jpg')]
+        # img_names = sorted(img_names[:1])
+        img_paths = [os.path.join(folder_pth, img_name) for img_name in img_names]
+        image_count += len(img_names)
+        
+        for i, (img_name, img_path) in enumerate(zip(img_names, img_paths)):
+            img = Image.open(img_path) 
+            img = np.array(img)
 
-        t0 = time.time()
-        detections, segmentation = bm_detector.get_detection(img_path)
-        t1 = time.time()
-        pred = inference(pose_predictor, img, K, detections, n_coarse_iterations, n_refiner_iterations)
-        t2 = time.time()
-        pred_rendered = render_prediction_wrt_camera(renderer, pred, cam)
-        t3 = time.time()
-        total_time += (t2-t1)
+            cam = dict(
+                resolution=input_dim,
+                K=K,
+                TWC=np.eye(4)
+                )
 
-        figures = dict()
-        figures['input_im'] = plotter.plot_image(img)
-        img_seg = plotter.plot_segm_overlay(img, segmentation)
-        figures['detections'] = plotter.plot_maskrcnn_bboxes(img_seg, detections)
+            t0 = time.time()
+            detections, segmentation = bm_detector.get_detection(img_path)
+            t1 = time.time()
+            pred = inference(pose_predictor, img, K, detections, n_coarse_iterations, n_refiner_iterations)
+            t2 = time.time()
+            pred_rendered = render_prediction_wrt_camera(renderer, pred, cam)
+            t3 = time.time()
+            total_time += (t2-t1)
 
-        figures['pred_rendered'] = plotter.plot_image(pred_rendered)
-        figures['pred_overlay'] = plotter.plot_overlay(img, pred_rendered)           
-        fig_array = [figures['input_im'], figures['detections'], figures['pred_rendered'], figures['pred_overlay']]
-        res = gridplot(fig_array, ncols=2)
-        img_name = img_name.replace('.jpg', '.png')
-        export_png(res, filename = os.path.join(save_dir, img_name))
-        print("{}/{} - Detection: {:.3} s Pose: {:.3} s Rendering: {:.3} s".format(i+1, len(img_names), t1-t0, t2-t1, t3-t2))
+            figures = dict()
+            figures['input_im'] = plotter.plot_image(img)
+            img_seg = plotter.plot_segm_overlay(img, segmentation)
+            figures['detections'] = plotter.plot_maskrcnn_bboxes(img_seg, detections)
+
+            binary_mask = pred_rendered[:,:,0] > 0
+            pred_rendered_binary = (binary_mask * 255).astype(np.uint8)
+            
+            figures['pred_rendered'] = plotter.plot_image(pred_rendered)
+            figures['pred_overlay'] = plotter.plot_overlay(img, pred_rendered)           
+            figures['pred_overlay'] = plotter.plot_confidence_scores(figures['pred_overlay'], detections, pred_rendered_binary, segmentation)
+            fig_array = [figures['input_im'], figures['detections'], figures['pred_rendered'], figures['pred_overlay']]
+            res = gridplot(fig_array, ncols=2)
+            export_png(res, filename = os.path.join(save_dir, img_name))
+            print("{}/{} - Detection: {:.3} s Pose: {:.3} s Rendering: {:.3} s".format(i+1, len(img_names), t1-t0, t2-t1, t3-t2))
 
     end_time = time.time()
-    print('Average pose inference time: {} ms'.format(1000*total_time/len(img_names)))
+    print('Average pose inference time: {} ms'.format(1000*total_time/image_count))
     print('Total inference time {} minutes'.format((end_time-start_time)/60))
     renderer.disconnect()
 

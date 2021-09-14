@@ -21,3 +21,4 @@ dist/
 build/
 *.temp
 jobs/
+inference_images

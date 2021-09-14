@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 import yaml
 import time
+import seaborn as sns
 
 from cosypose.config import EXP_DIR
 from cosypose.datasets.datasets_cfg import make_object_dataset
@@ -77,9 +78,10 @@ def inference(pose_predictor, image, camera_k, detections, coarse_it=1, refiner_
 
 
 def main():
-    urdf_ds_name = 'bm3.cad'
+    urdf_ds_name = 'kuatless.cad'
     input_dim = (1080, 810)
-    coarse_run_id = 'bop-bm3-coarse-dsg-300643' # epoch 200
+    coarse_run_id = 'bop-kuatless-coarse-v6'
+    coarse_run_id = 'bop-kuatless-coarse-collision-visib-704232' # epoch 200
     coarse_epoch = 200
     n_coarse_iterations = 1
 
@@ -88,7 +90,7 @@ def main():
     refiner_epoch = 180
     n_refiner_iterations = 1
 
-    if refiner_run_id is None:
+    if not refiner_run_id:
         refiner_epoch = 0
         n_refiner_iterations = 0
 
@@ -111,15 +113,15 @@ def main():
     total_time = 0.0
     start_time = time.time()
 
-    folder_name = '000000'
-    folder_pth = '/mnt-ssd/datasets/BM/bm3/test_pbr_1080_810/{}/rgb'.format(folder_name)
-    save_dir = '/mnt/trains/users/azad/BM/results/double_spur_gear/{}'.format(folder_name)
+    folder_name = '000001'
+    folder_pth = '/mnt-ssd/datasets/BM/kuatless/test5_pbr_1080_810/{}/rgb'.format(folder_name)
+    save_dir = '/mnt/trains/users/azad/BM/results/collision_colorful_pbr15/{}'.format(folder_name)
     os.makedirs(save_dir, exist_ok=True)
 
     file_names = os.listdir(folder_pth)
     img_names = [file_name for file_name in file_names if file_name.endswith('.png') or file_name.endswith('.jpg')]
+    img_names = sorted(img_names)[21::150]
     # img_names = img_names[111:112]
-    img_names = sorted(img_names)[::150]
     img_paths = [os.path.join(folder_pth, img_name) for img_name in img_names]
     
     for i, (img_name, img_path) in enumerate(zip(img_names, img_paths)):
@@ -127,7 +129,8 @@ def main():
         img = np.array(img)
 
         t0 = time.time()
-        detections, segmentation = bm_detector.get_detection(img_path)
+        detections, segmentation, segm_individual = bm_detector.get_detection(img_path)
+
         t1 = time.time()
         pred = inference(pose_predictor, img, K, detections, n_coarse_iterations, n_refiner_iterations)
         t2 = time.time()
@@ -137,7 +140,7 @@ def main():
 
         figures = dict()
         figures['input_im'] = plotter.plot_image(img)
-        img_seg = plotter.plot_segm_overlay(img, segmentation)
+        img_seg = plotter.plot_segm_overlay_colorful(img, segm_individual)
         figures['detections'] = plotter.plot_maskrcnn_bboxes(img_seg, detections)
 
         figures['pred_rendered'] = plotter.plot_image(pred_rendered)

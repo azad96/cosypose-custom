@@ -20,36 +20,37 @@ from bop_toolkit_lib import inout  # noqa
 
 def main():
     parser = argparse.ArgumentParser('Bop evaluation')
-    parser.add_argument('--result_name', default='kuatless-test-1080-810-n_views=1-332k-v6', type=str)
-    parser.add_argument('--targets_filename', default='kuatless_test_1080_810.json', type=str)
+    parser.add_argument('--results_folder', default='kuatless.test5_pbr_1080_810-n_views=1-collision', type=str)
+    parser.add_argument('--targets_filename', default='kuatless_test5_1080_810.json', type=str)
     parser.add_argument('--convert_only', action='store_true')
     args = parser.parse_args()
     run_evaluation(args)
 
 
 def run_evaluation(args):
-    result_path = os.path.join(RESULTS_DIR, args.result_name, 'results.pth.tar')
-    coarse_csv_name = 'coarse-332k-v6__kuatless-test_pbr_1080_810.csv'
-    coarse_csv_path = os.path.join(RESULTS_DIR, args.result_name, coarse_csv_name)
-    coarse_method = 'pix2pose_detections/coarse/iteration=1'
-    convert_results(result_path, coarse_csv_path, method=coarse_method)
+    results_folder_path = os.path.join(RESULTS_DIR, args.results_folder)
+    results_file_path = os.path.join(results_folder_path, 'results.pth.tar')
+    # coarse_csv_name = 'coarse.csv'
+    # coarse_csv_path = os.path.join(RESULTS_DIR, args.result_folder, coarse_csv_name)
+    # coarse_method = 'pix2pose_detections/coarse/iteration=1'
+    # convert_results(results_file_path, coarse_csv_path, method=coarse_method)
 
-    refiner_csv_name = 'refiner-332k-v6__kuatless-test_pbr_1080_810.csv'
-    refiner_csv_path = os.path.join(RESULTS_DIR, args.result_name, refiner_csv_name)
+    refiner_csv_name = 'refiner.csv'
+    refiner_csv_path = os.path.join(RESULTS_DIR, args.results_folder, refiner_csv_name)
     refiner_method = 'pix2pose_detections/refiner/iteration=1'
-    convert_results(result_path, refiner_csv_path, method=refiner_method)
+    convert_results(results_file_path, refiner_csv_path, method=refiner_method)
 
-    csv_paths = ','.join([coarse_csv_path, refiner_csv_path])
-    # csv_paths = coarse_csv_path
+    # result_filenames = ','.join([coarse_csv_name, refiner_csv_name])
+    result_filenames = refiner_csv_name
 
     if not args.convert_only:
-        run_bop_evaluation(csv_paths, args.targets_filename)
+        run_bop_evaluation(results_folder_path, result_filenames, args.targets_filename)
 
 
-def convert_results(results_path, out_csv_path, method):
-    predictions = torch.load(results_path)['predictions']
+def convert_results(results_file_path, out_csv_path, method):
+    predictions = torch.load(results_file_path)['predictions']
     predictions = predictions[method]
-    print("Predictions from:", results_path)
+    print("Predictions from:", results_file_path)
     print("Method:", method)
     print("Number of predictions: ", len(predictions))
 
@@ -73,7 +74,7 @@ def convert_results(results_path, out_csv_path, method):
     return out_csv_path
 
 
-def run_bop_evaluation(filenames, targets_filename):
+def run_bop_evaluation(results_folder_path, filenames, targets_filename):
     myenv = os.environ.copy()
     myenv['PYTHONPATH'] = TOOLKIT_DIR.as_posix()
     myenv['COSYPOSE_DIR'] = PROJECT_DIR.as_posix()
@@ -81,6 +82,7 @@ def run_bop_evaluation(filenames, targets_filename):
     s = time()
     subprocess.call(['python', script_path.as_posix(),
                      '--renderer_type', 'python',
+                     '--results_path', results_folder_path,
                      '--targets_filename', targets_filename,
                      '--result_filenames', filenames],
                     env=myenv, cwd=TOOLKIT_DIR.as_posix())

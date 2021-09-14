@@ -4,12 +4,11 @@ import json
 import numpy as np
 import pickle
 
-pth = "/mnt-ssd/datasets/BM/kuatless/test-collision_pbr_1080_810"
+pth = "/mnt-ssd/datasets/BM/bm3/test_pbr_1080_810"
 # pth = "/raid/datasets/Bright_Machines/Bin_Picking/kuatless/test_pbr_1080_810"
 # pth = "/mnt/trains/users/azad/BM/docker/local_data/bop_datasets/kuatless/test_pbr_1080_810"
 # save_pth = "/mnt/trains/users/azad/BM/docker/local_data/saved_detections/kuatless_test_1080_810.pkl"
-save_pth = "/mnt/trains/users/azad/BM/cosypose_azd/local_data/saved_detections/kuatless_test-collision-visib_1080_810.pkl"
-# save_pth = "/mnt-ssd/datasets/BM/bm2/bm2_test3_1080_810.pkl"
+save_pth = "/mnt/trains/users/azad/BM/cosypose_azd/local_data/saved_detections/bm3_test_1080_810.pkl"
 scene_ids = sorted(os.listdir(pth))
 img_id = 0
 

@@ -96,7 +96,7 @@ def get_pose_meters(scene_ds):
     visib_gt_min = -1
     dataset_type, test_ds = ds_name.split('.')
     test_type, pbr_type, width, height = test_ds.split('_')
-    targets_filename = '{}_{}_{}_{}.json'.format(dataset_type, test_type, width, height) #kuatless_test_1080_810.json
+    targets_filename = '{}_{}_{}_{}.json'.format(dataset_type, test_type, width, height) # kuatless_test_1080_810.json
 
     if targets_filename is not None:
         targets_path = scene_ds.ds_dir / targets_filename
@@ -186,7 +186,7 @@ def main():
     init_distributed_mode()
 
     parser = argparse.ArgumentParser('Evaluation')
-    parser.add_argument('--config', default='kuatless-test-1080-810', type=str, required=True)
+    parser.add_argument('--config', default='kuatless.test_pbr_1080_810', type=str, required=True)
     parser.add_argument('--comment', type=str, required=True)
     parser.add_argument('--nviews', dest='n_views', default=1, type=int, required=True)
     args = parser.parse_args()
@@ -206,23 +206,32 @@ def main():
     # coarse_run_id = 'bop-kuatless-coarse-785678' # v9 epoch 190
     # coarse_run_id = 'bop-kuatless-coarse-n20-981893' # epoch 150
     # coarse_run_id = 'bop-kuatless-coarse-n25-284510' # epoch 130
-    coarse_run_id = 'bop-kuatless-coarse-332k-v6' # epoch 90
-    coarse_epoch = 90
+    # coarse_run_id = 'bop-kuatless-coarse-332k-v6' # epoch 90
+    coarse_run_id = 'bop-kuatless-coarse-collision-visib-704232' # epoch 150
+    coarse_epoch = 150
     n_coarse_iterations = 1
 
-    refiner_run_id = None
+    # refiner_run_id = None
     # refiner_run_id = 'bop-tless-kuartis-refiner--607469' # v1
     # refiner_run_id = 'bop-tless-kuartis-refiner--434633' # v2
     # refiner_run_id = 'bop-tless-kuartis-refiner--243227' # v3 epoch 90
     # refiner_run_id = 'bop-tless-kuartis-refiner--689761' # v4 epoch 20 but 100 seems better
     # refiner_run_id = 'bop-tless-kuartis-refiner--143806' # v5.1 epoch 200
-    # refiner_run_id = 'bop-kuatless-refiner-v5.2' # v5.2 epoch 180
-    refiner_run_id = 'bop-kuatless-refiner-332k-v6' # epoch 50
-    refiner_epoch = 50
+    refiner_run_id = 'bop-kuatless-refiner-v5.2' # v5.2 epoch 180
+    # refiner_run_id = 'bop-kuatless-refiner-332k-v6' # epoch 50
+    refiner_epoch = 180
     n_refiner_iterations = 1
 
-    ds_type, test_type, w, h = args.config.split('-') # kuatless-test-1080-810
-    ds_name = '{}.{}_pbr_{}_{}'.format(ds_type, test_type, w, h) # kuatless.test_pbr_1080_810
+    # ds_type, test_type, w, h = args.config.split('-') # kuatless-test-1080-810
+    # ds_name = '{}.{}_pbr_{}_{}'.format(ds_type, test_type, w, h) # kuatless.test_pbr_1080_810
+    # pickle_file = '{}_{}_{}_{}.pkl'.format(ds_type, test_type, w, h) # kuatless_test_1080_810.pkl
+    # object_set = ds_type
+    # logger.info(f"DS NAME: {ds_name}")
+
+    ds_name = args.config
+    breakpoint()
+    ds_type, test_set = ds_name.split('.') # kuatless.test_pbr_1080_810
+    test_type, split_type, w, h = test_set.split('_') # test_pbr_1080_810
     pickle_file = '{}_{}_{}_{}.pkl'.format(ds_type, test_type, w, h) # kuatless_test_1080_810.pkl
     object_set = ds_type
     logger.info(f"DS NAME: {ds_name}")

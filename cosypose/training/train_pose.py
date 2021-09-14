@@ -1,3 +1,4 @@
+import pickle
 import yaml
 import numpy as np
 import time
@@ -132,8 +133,10 @@ def make_eval_bundle(args, model_training):
         pred_kwargs = dict()
 
         w, h = args.input_resize
-        ds_folder_name, _ = ds_name.split('.')
-        pickle_file = '{}_test_{}_{}.pkl'.format(ds_folder_name, w, h) # kuatless_test_1080_810.pkl
+        ds_folder_name, test_set = ds_name.split('.')
+        test_type = test_set.split('_')[0] # test_pbr_1080_810
+        pickle_file = '{}_{}_{}_{}.pkl'.format(ds_folder_name, test_type, w, h) # kuatless_test_1080_810.pkl
+        logger.info(f'PICKLE FILE: {pickle_file}')
         detections = load_kuatless_detection_results(pickle_file=pickle_file,
                                             remove_incorrect_poses=False).cpu()
         coarse_detections = load_kuatless_detection_results(pickle_file=pickle_file,
@@ -217,17 +220,17 @@ def train_pose(args):
     args.save_dir = EXP_DIR / args.run_id
     args = check_update_config(args)
 
-    logger.info(f"{'-'*80}")
-    for k, v in args.__dict__.items():
-        logger.info(f"{k}: {v}")
-    logger.info(f"{'-'*80}")
-
     # Initialize distributed
     device = torch.cuda.current_device()
     init_distributed_mode()
     world_size = get_world_size()
     args.n_gpus = world_size
     args.global_batch_size = world_size * args.batch_size
+
+    logger.info(f"{'-'*80}")
+    for k, v in args.__dict__.items():
+        logger.info(f"{k}: {v}")
+    logger.info(f"{'-'*80}")
     logger.info(f'Connection established with {world_size} gpus.')
 
     # Make train/val datasets

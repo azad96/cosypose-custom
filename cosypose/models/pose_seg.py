@@ -1,3 +1,4 @@
+import enum
 import torch
 from torch import nn
 
@@ -32,7 +33,6 @@ class PosePredictor(nn.Module):
         self.heads = dict()
         self.pose_fc = nn.Linear(n_features, pose_dim, bias=True)
         self.heads['pose'] = self.pose_fc
-
         self.debug = False
         self.tmp_debug = dict()
 
@@ -42,7 +42,7 @@ class PosePredictor(nn.Module):
     def disable_debug(self):
         self.debug = False
 
-    def crop_inputs(self, images, K, TCO, labels):
+    def crop_inputs(self, images, segmentations, K, TCO, labels):
         bsz, nchannels, h, w = images.shape
         assert K.shape == (bsz, 3, 3)
         assert TCO.shape == (bsz, 4, 4)
@@ -55,6 +55,10 @@ class PosePredictor(nn.Module):
             images=images, obs_boxes=boxes_rend, K=K,
             TCO_pred=TCO, O_vertices=points, output_size=self.render_size, lamb=1.4
         )
+        _, segmentations_cropped = deepim_crops(
+            images=segmentations, obs_boxes=boxes_rend, K=K,
+            TCO_pred=TCO, O_vertices=points, output_size=self.render_size, lamb=1.4
+        )        
         K_crop = get_K_crop_resize(K=K.clone(), boxes=boxes_crop,
                                    orig_size=images.shape[-2:], crop_resize=self.render_size)
         if self.debug:
@@ -64,7 +68,7 @@ class PosePredictor(nn.Module):
                 uv=uv,
                 boxes_crop=boxes_crop,
             )
-        return images_cropped, K_crop.detach(), boxes_rend, boxes_crop
+        return images_cropped, segmentations_cropped, K_crop.detach(), boxes_rend, boxes_crop
 
     def update_pose(self, TCO, K_crop, pose_outputs):
         if self.pose_dim == 9:
@@ -79,18 +83,14 @@ class PosePredictor(nn.Module):
         return TCO_updated
 
     def net_forward(self, x):
-        # print('before backbone {}'.format(x.shape))
         x = self.backbone(x)
-        # print('after backbone {}'.format(x.shape))
         x = x.flatten(2).mean(dim=-1)
-        # print('after flatten {}'.format(x.shape))
-
         outputs = dict()
         for k, head in self.heads.items():
             outputs[k] = head(x)
-        return outputs
+        return outputs, x
 
-    def forward(self, images, K, labels, TCO, n_iterations=1):
+    def forward(self, images, segmentations, K, labels, TCO, n_iterations=1):
         bsz, nchannels, h, w = images.shape
         assert K.shape == (bsz, 3, 3)
         assert TCO.shape == (bsz, 4, 4)
@@ -98,16 +98,26 @@ class PosePredictor(nn.Module):
         
         outputs = dict()
         TCO_input = TCO
+
         for n in range(n_iterations):
             TCO_input = TCO_input.detach()
-            images_crop, K_crop, boxes_rend, boxes_crop = self.crop_inputs(images, K, TCO_input, labels)
+            images_crop, segmentations_crop, K_crop, boxes_rend, boxes_crop = self.crop_inputs(images, segmentations, K, TCO_input, labels)
+
+            # images_crop[segmentations_crop.repeat(1, 3, 1, 1) == 0] = 1.0
+            # from torchvision.utils import save_image
+            # for i,img in enumerate(images_crop):
+            #     save_image(img, 'img_white{}.png'.format(i))
+            # for i,seg in enumerate(segmentations_crop):
+            #     save_image(seg, 'seg{}.png'.format(i))
+
             renders = self.renderer.render(obj_infos=[dict(name=l) for l in labels],
                                            TCO=TCO_input,
-                                           K=K_crop, resolution=self.render_size)
+                                           K=K_crop, 
+                                           resolution=self.render_size)
 
             x = torch.cat((images_crop, renders), dim=1)
 
-            model_outputs = self.net_forward(x)
+            model_outputs, feat = self.net_forward(x)
 
             TCO_output = self.update_pose(TCO_input, K_crop, model_outputs['pose'])
 
@@ -116,6 +126,7 @@ class PosePredictor(nn.Module):
                 'TCO_output': TCO_output,
                 'K_crop': K_crop,
                 'model_outputs': model_outputs,
+                'features' : feat,
                 'boxes_rend': boxes_rend,
                 'boxes_crop': boxes_crop,
             }

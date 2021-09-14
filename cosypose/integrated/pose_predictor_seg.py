@@ -23,7 +23,7 @@ class CoarseRefinePosePredictor(torch.nn.Module):
         self.eval()
 
     @torch.no_grad()
-    def batched_model_predictions(self, model, images, K, obj_data, n_iterations=1):
+    def batched_model_predictions(self, model, images, segmentations, K, obj_data, n_iterations=1):
         timer = Timer()
         timer.start()
 
@@ -41,8 +41,8 @@ class CoarseRefinePosePredictor(torch.nn.Module):
             images_ = images[im_ids]
             K_ = K[im_ids]
             TCO_input = obj_inputs.poses
-            outputs = model(images=images_, K=K_, TCO=TCO_input,
-                            n_iterations=n_iterations, labels=labels)
+            outputs = model(images=images_, segmentations=segmentations, K=K_, 
+                            TCO=TCO_input, n_iterations=n_iterations, labels=labels)
             timer.pause()
             for n in range(1, n_iterations+1):
                 iter_outputs = outputs[f'iteration={n}']
@@ -73,8 +73,11 @@ class CoarseRefinePosePredictor(torch.nn.Module):
             TCO_init = TCO_init_from_boxes(z_range=(1.0, 1.0), boxes=boxes, K=K)
         return tc.PandasTensorCollection(infos=detections.infos, poses=TCO_init)
 
-    def get_predictions(self, images, K,
+    def get_predictions(self, 
+                        images, 
+                        K,
                         detections=None,
+                        segmentations=None, 
                         data_TCO_init=None,
                         n_coarse_iterations=1,
                         n_refiner_iterations=1):
@@ -86,7 +89,7 @@ class CoarseRefinePosePredictor(torch.nn.Module):
             assert n_coarse_iterations > 0
             data_TCO_init = self.make_TCO_init(detections, K)
             coarse_preds = self.batched_model_predictions(self.coarse_model,
-                                                          images, K, data_TCO_init,
+                                                          images, segmentations, K, data_TCO_init,
                                                           n_iterations=n_coarse_iterations)
             for n in range(1, n_coarse_iterations + 1):
                 preds[f'coarse/iteration={n}'] = coarse_preds[f'iteration={n}']
@@ -99,7 +102,7 @@ class CoarseRefinePosePredictor(torch.nn.Module):
         if n_refiner_iterations >= 1:
             assert self.refiner_model is not None
             refiner_preds = self.batched_model_predictions(self.refiner_model,
-                                                           images, K, data_TCO,
+                                                           images, segmentations, K, data_TCO,
                                                            n_iterations=n_refiner_iterations)
             for n in range(1, n_refiner_iterations + 1):
                 preds[f'refiner/iteration={n}'] = refiner_preds[f'iteration={n}']

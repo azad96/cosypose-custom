@@ -209,6 +209,13 @@ class Plotter:
             rgba[instance_segm == uniq, -1] = alpha * 255
         return rgba
 
+    def _make_rgba_instance_segm_colorful(self, instance_segm, colors, alpha=0.8):
+        rgba = np.zeros((*instance_segm.shape[-2:], 4), dtype=np.uint8)
+        for segm, color in zip(instance_segm, colors):
+            rgba[segm, :3] = np.array(color) * 255
+            rgba[segm, -1] = alpha * 255
+        return rgba
+
     def plot_mask_overlay(self, im, mask, th=0.9, alpha=0.8, figure=None):
         im = self.numpy(im)
         new_fig = figure is None
@@ -262,7 +269,36 @@ class Plotter:
         segm = self.numpy(segm)
         if segm.dtype != np.uint8:
             segm = segm.argmax(0)
+
         segm_rgba = self._make_rgba_instance_segm(segm, colors=self.colors, alpha=alpha)
+
+        if new_fig:
+            figure = make_image_figure(im_size=(w, h), axes=False)
+
+        source, new = self.get_source(f'{figure.id}/segm')
+
+        if new:
+            figure.image_rgba('rgb', x=0, y=0, dw=w, dh=h, source=source)
+            figure.image_rgba('segm', x=0, y=0, dw=w, dh=h, source=source)
+
+        source.data = dict(rgb=[to_rgba(im)], segm=[to_rgba(segm_rgba)])
+        return figure
+
+    def make_colormaps(self, instance_count):
+        colors_hex = sns.color_palette(n_colors=instance_count).as_hex()
+        colormap_hex = [color for color in colors_hex]
+        colormap_rgb = [[int(h[1:][i:i+2], 16) / 255. for i in (0, 2, 4)] for h in colormap_hex]
+        return colormap_rgb, colormap_hex
+
+    def plot_segm_overlay_colorful(self, im, segm, alpha=0.8, figure=None):
+        im = self.numpy(im)[..., :3]
+        h, w, _ = im.shape
+        new_fig = figure is None
+        segm = self.numpy(segm)
+        
+        instance_count = len(segm)
+        colormap_rgb, _ = self.make_colormaps(instance_count)
+        segm_rgba = self._make_rgba_instance_segm_colorful(segm, colors=colormap_rgb, alpha=alpha)
 
         if new_fig:
             figure = make_image_figure(im_size=(w, h), axes=False)
@@ -312,3 +348,5 @@ class Plotter:
             self.source_map[name] = source
             new = True
         return source, new
+
+

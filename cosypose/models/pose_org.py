@@ -1,3 +1,4 @@
+import enum
 import torch
 from torch import nn
 
@@ -93,12 +94,14 @@ class PosePredictor(nn.Module):
         
         outputs = dict()
         TCO_input = TCO
+
         for n in range(n_iterations):
             TCO_input = TCO_input.detach()
             images_crop, K_crop, boxes_rend, boxes_crop = self.crop_inputs(images, K, TCO_input, labels)
             renders = self.renderer.render(obj_infos=[dict(name=l) for l in labels],
                                            TCO=TCO_input,
-                                           K=K_crop, resolution=self.render_size)
+                                           K=K_crop, 
+                                           resolution=self.render_size)
 
             x = torch.cat((images_crop, renders), dim=1)
 

@@ -40,23 +40,23 @@ def make_cfg(args):
     cfg.n_rendering_workers = 0
     cfg.refiner_run_id_for_test = None
     cfg.refiner_test_epoch = None
-    cfg.coarse_run_id_for_test = 'bop-kuatless-coarse-332k-v6'
-    cfg.coarse_test_epoch = 90
-    # cfg.run_id_pretrain = 'coarse-bop-tless-pbr--506801' 
+    cfg.coarse_run_id_for_test = None
+    cfg.coarse_test_epoch = None
+    cfg.run_id_pretrain = 'coarse-bop-tless-pbr--506801' 
     # cfg.run_id_pretrain = 'bop-kuatless-coarse-noise-874436' 
     # cfg.run_id_pretrain = 'bop-kuatless-coarse-noise2-824870' 
     # cfg.run_id_pretrain = 'bop-kuatless-coarse-noise3-481715' 
     # cfg.run_id_pretrain = 'bop-kuatless-coarse-noise-132k-582997' 
     # cfg.run_id_pretrain = 'bop-kuatless-coarse-v5.3' # epoch 160
     # cfg.run_id_pretrain = 'bop-kuatless-coarse-v6' # epoch 140
-    cfg.run_id_pretrain = 'bop-kuatless-refiner-v5.2' # v5.2 epoch 180
-    cfg.pretrain_epoch = 180
-    cfg.use_cosypose_model = False
+    # cfg.run_id_pretrain = 'bop-kuatless-refiner-v5.2' # v5.2 epoch 180
+    cfg.pretrain_epoch = None
+    cfg.use_cosypose_model = True
 
     # Optimizer
-    cfg.lr = 3e-6 # adam default: 3e-4, sgd: 3e-2
+    cfg.lr = 3e-5 # adam default: 3e-4, sgd: 3e-2
     cfg.weight_decay = 0.
-    cfg.n_epochs_warmup = 0 # 50
+    cfg.n_epochs_warmup = 10 # 50
     cfg.lr_epoch_decay = 250 # 250
     cfg.clip_grad_norm = 0.5
 

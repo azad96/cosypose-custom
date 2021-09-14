@@ -387,8 +387,8 @@ def main():
         gt_state = dict()
         gt_state['camera'] = dict({'T0C': np.eye(4),
                                     'K': K_matrices[view_id],
-                                    'resolution': input_dim, # SIRASINI TERS DENE
-                                    'TWC': np.eye(4), # TWC'YI BURAYA DA VER
+                                    'resolution': input_dim,
+                                    'TWC': np.eye(4), # try also putting TWC here
                                     }) 
         fig_input_im = plotter.plot_image(input_rgb)
 
